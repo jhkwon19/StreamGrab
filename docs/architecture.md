@@ -11,6 +11,9 @@ CLI
  ├─ Network (제한된 크기의 HTML 요청)
  ├─ Generic Extractor
  │    └─ StreamInfo
+ ├─ Platform Backend
+ │    ├─ YouTube (yt-dlp adapter)
+ │    └─ Protected/embedded generic page (yt-dlp + curl-cffi fallback)
  └─ Downloader
       ├─ Direct (MP4, WebM)
       └─ HLS (FFmpeg stream copy)
@@ -25,6 +28,7 @@ CLI
 - `network`: 스크립트를 실행하지 않고 제한된 크기의 HTML을 가져온다.
 - `extractors`: 표준 미디어 속성에서 스트림 후보를 찾는다.
 - `downloaders`: 스트림 형식에 맞는 구현으로 파일을 저장한다.
+- `backends`: 변동이 크고 전문 유지보수가 필요한 플랫폼을 격리해 연결한다.
 - `filenames`: 운영체제에 안전하고 기존 파일을 덮어쓰지 않는 경로를 만든다.
 
 Extractor는 파일을 저장하지 않고, Downloader는 웹페이지를 분석하지 않는다는
@@ -47,3 +51,15 @@ Extractor는 파일을 저장하지 않고, Downloader는 웹페이지를 분석
   curl로 세그먼트를 전송한 뒤 FFmpeg로 로컬 병합한다.
 - DASH를 식별할 수 있지만 Downloader는 아직 없다.
 - DRM 해제와 접근 권한 우회는 프로젝트 범위에 포함하지 않는다.
+
+## 전문 플랫폼 백엔드
+
+YouTube처럼 서명 해석, JavaScript challenge, 영상·음성 선택 규칙이 지속적으로
+변하는 플랫폼은 자체 Site Extractor로 복제하지 않는다. 검증된 외부 프로젝트를
+어댑터 뒤에 배치하고 CLI와 오류·진행률·출력 정책만 StreamGrab 방식으로
+정규화한다. 외부 백엔드에서 반환되는 서명 URL의 query는 로그에서 제거한다.
+
+정적 Generic Extractor가 네트워크 차단 또는 미디어 미발견으로 끝난 경우에만
+yt-dlp Generic fallback을 호출한다. fallback은 `generic:impersonate`를 사용해
+지원되는 브라우저 TLS 지문으로 다시 요청하고 iframe 내부의 전문 extractor로
+위임한다. CAPTCHA, 로그인 또는 DRM 우회는 이 계층의 책임이 아니다.

@@ -8,9 +8,23 @@ from typing import Sequence
 from urllib.parse import unquote, urlsplit
 
 from streamgrab import __version__
+from streamgrab.backends.youtube import (
+    download_youtube,
+    is_youtube_url,
+    list_youtube_formats,
+)
+from streamgrab.backends.generic_ytdlp import (
+    download_generic,
+    list_generic_formats,
+)
 from streamgrab.config import load_config
 from streamgrab.downloaders import download_stream
-from streamgrab.exceptions import ConfigError, StreamGrabError, StreamNotFoundError
+from streamgrab.exceptions import (
+    ConfigError,
+    NetworkError,
+    StreamGrabError,
+    StreamNotFoundError,
+)
 from streamgrab.extractors import GenericExtractor
 from streamgrab.extractors.generic import detect_stream_type
 from streamgrab.filenames import output_path
@@ -41,10 +55,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-f",
         "--format",
-        type=int,
-        default=1,
+        default=None,
         metavar="ID",
-        help="다운로드할 스트림 번호 (기본값: 1)",
+        help="스트림 번호 또는 플랫폼 형식 ID (기본값: 최고 품질)",
     )
     parser.add_argument(
         "--list-formats",
@@ -77,16 +90,39 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     try:
-        streams = _find_streams(args.url, config.network_timeout)
+        if is_youtube_url(args.url):
+            if args.list_formats:
+                list_youtube_formats(args.url)
+            else:
+                download_youtube(
+                    args.url,
+                    args.output or config.output_directory,
+                    args.format,
+                )
+            return 0
+
+        try:
+            streams = _find_streams(args.url, config.network_timeout)
+        except (NetworkError, StreamNotFoundError):
+            if args.list_formats:
+                list_generic_formats(args.url)
+            else:
+                download_generic(
+                    args.url,
+                    args.output or config.output_directory,
+                    args.format,
+                )
+            return 0
         if args.list_formats:
             _print_streams(streams)
             return 0
-        if args.format < 1 or args.format > len(streams):
+        format_number = _generic_format_number(args.format)
+        if format_number < 1 or format_number > len(streams):
             raise StreamNotFoundError(
                 f"스트림 번호는 1부터 {len(streams)} 사이여야 합니다"
             )
 
-        selected = streams[args.format - 1]
+        selected = streams[format_number - 1]
         destination = output_path(
             selected, args.output or config.output_directory
         )
@@ -117,3 +153,14 @@ def _print_streams(streams: list[StreamInfo]) -> None:
     print("ID  Type    Title")
     for index, stream in enumerate(streams, start=1):
         print(f"{index:<3} {stream.stream_type.value:<7} {stream.title}")
+
+
+def _generic_format_number(value: str | None) -> int:
+    if value is None:
+        return 1
+    try:
+        return int(value)
+    except ValueError as error:
+        raise StreamNotFoundError(
+            "일반 웹페이지의 형식 ID는 숫자여야 합니다"
+        ) from error

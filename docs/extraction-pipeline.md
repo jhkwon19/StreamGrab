@@ -46,7 +46,9 @@ URL 분류 ── 직접 미디어 URL이면 Stream Candidate 생성
 | JSON-LD/페이지 JSON | 허용된 키에서 미디어 URL 탐색 | 예정 |
 | JavaScript 플레이어 설정 | 알려진 설정 객체를 정적으로 파싱 | 예정 |
 | iframe 플레이어 | 깊이·도메인 제한을 둔 재귀 분석 | 예정 |
-| API 호출 후 URL 생성 | 사이트별 Extractor 또는 브라우저 분석 | 예정 |
+| API 호출 후 URL 생성 | 사이트별 Extractor 또는 전문 백엔드 | 예정 |
+| YouTube | yt-dlp 전문 백엔드 | 기본 지원 |
+| Cloudflare 보호/iframe 페이지 | yt-dlp Generic + curl-cffi fallback | 기본 지원 |
 | 로그인 세션 필요 | 명시적 쿠키 입력과 비밀정보 마스킹 | 예정 |
 | Blob URL | 원본 네트워크 요청 분석 | 브라우저 단계에서 검토 |
 | DASH | MPD 분석 후 영상·음성 병합 | 예정 |
@@ -58,7 +60,8 @@ URL 분류 ── 직접 미디어 URL이면 Stream Candidate 생성
 2. Generic Extractor로 표준 HTML과 구조화 데이터를 분석한다.
 3. iframe처럼 추가 HTTP 요청이 필요한 범용 분석을 수행한다.
 4. 도메인 고유 규칙이 꼭 필요한 경우 Site Extractor를 적용한다.
-5. 정적 분석으로 불가능하고 사용자가 명시적으로 허용한 경우에만 브라우저
+5. 변동이 크고 검증된 전문 구현이 있는 플랫폼은 격리된 Backend를 사용한다.
+6. 정적 분석으로 불가능하고 사용자가 명시적으로 허용한 경우에만 브라우저
    분석을 시도한다.
 
 Generic 분석이 Site Extractor보다 우선한다. 사이트가 HTML 구조를 바꾸더라도
@@ -134,4 +137,3 @@ Extractor가 발견한 값은 즉시 다운로드하지 않고 공통 후보로 
 - 페이지 스크립트 문자열을 코드로 실행하지 않는다.
 - iframe 재귀 분석에는 깊이, 응답 크기, 요청 수 제한을 둔다.
 - DRM 해제, 인증 우회, 접근 권한 우회는 구현하지 않는다.
-

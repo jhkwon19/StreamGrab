@@ -1119,11 +1119,14 @@ Generic → Site Specific
 현재 단계:
 
 ```text
-Phase 2~4 — Direct Media, Generic Extractor 및 기본 HLS 수직 기능
+Version 0.2 — Generic Media, HLS 및 YouTube 기본 지원
 ```
 
 Python 패키지 기반 위에 표준 HTML 미디어 분석, 직접 미디어 저장 및 FFmpeg 기반
-HLS 저장의 첫 동작 경로가 구성되었다.
+HLS 저장의 첫 동작 경로가 구성되었다. 변화가 잦은 YouTube는 yt-dlp 전문
+백엔드로 격리해 형식 조회, 최고 품질 선택 및 영상·음성 병합을 지원한다.
+정적 분석이 차단되거나 iframe만 있는 페이지는 curl-cffi impersonation을 사용하는
+yt-dlp Generic fallback으로 분석하고, 발견된 전문 플레이어 extractor에 위임한다.
 현재 구현 범위와 다음 작업은 `docs/development.md`와 `TODO.md`에서 관리한다.
 
 본 문서는 StreamGrab 개발의 기본 방향을 정의하기 위한 초기 문서이며, 실제 개발 과정에서 필요에 따라 지속적으로 수정한다.

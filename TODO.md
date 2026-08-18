@@ -47,6 +47,22 @@
 - [ ] 브라우저 기반 분석 검토
 - [ ] 사이트별 플러그인 구조 구현
 
+## 플랫폼 백엔드
+
+- [x] yt-dlp 기반 YouTube URL 감지와 다운로드
+- [x] YouTube 형식 목록과 native format ID 선택
+- [x] YouTube 영상·음성 전체 바이트 진행률 통합
+- [x] YouTube fragment 진행률 역행 및 병합 안내 중복 방지
+- [x] yt-dlp 로그의 서명 query 마스킹
+- [x] PATH 및 NVM에서 지원되는 Node.js 22+ 자동 탐색
+- [x] 정적 분석 실패 시 yt-dlp Generic Extractor fallback
+- [x] curl-cffi 기반 Cloudflare impersonation 지원
+- [ ] Deno/Node 런타임 진단 명령 추가
+- [ ] Generic fallback에서 여러 embedded video 선택 정책 설계
+- [ ] YouTube 로그인·연령 제한용 명시적 cookie 옵션 검토
+- [ ] YouTube playlist는 별도 명령과 확인 절차로 설계
+- [ ] YouTube 자막 저장 기능 설계 시 기존 transcript API 경험 검토
+
 ## 장기 검토
 
 - [ ] Web UI 또는 GUI
