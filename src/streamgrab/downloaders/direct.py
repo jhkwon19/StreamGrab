@@ -21,7 +21,9 @@ def download_direct(stream: StreamInfo, destination: Path, timeout: float) -> No
 
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with urlopen(request, timeout=timeout) as response, temporary.open("xb") as file:
+        # A cancelled process can leave a partial file behind. Reusing the
+        # destination must restart cleanly instead of failing with FileExistsError.
+        with urlopen(request, timeout=timeout) as response, temporary.open("wb") as file:
             temporary_created = True
             while chunk := response.read(1024 * 1024):
                 file.write(chunk)

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 from urllib.parse import urljoin, urlsplit
+
+from curl_cffi import requests as curl_requests
 
 from streamgrab.exceptions import FFmpegError
 from streamgrab.models import StreamInfo
@@ -18,7 +21,7 @@ logger = logging.getLogger("streamgrab")
 
 
 def download_hls(stream: StreamInfo, destination: Path) -> None:
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = _find_ffmpeg()
     if ffmpeg is None:
         raise FFmpegError("HLS 저장에는 FFmpeg가 필요합니다")
 
@@ -53,51 +56,70 @@ def download_hls(stream: StreamInfo, destination: Path) -> None:
     )
 
 
+def _find_ffmpeg() -> str | None:
+    """Find FFmpeg on PATH or in a current-user WinGet installation."""
+    discovered = shutil.which("ffmpeg")
+    if discovered:
+        return discovered
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return None
+    packages = Path(local_app_data) / "Microsoft" / "WinGet" / "Packages"
+    if not packages.is_dir():
+        return None
+    patterns = (
+        "Gyan.FFmpeg*/ffmpeg-*/bin/ffmpeg.exe",
+        "Gyan.FFmpeg*/ffmpeg-*/bin/ffmpeg",
+    )
+    for pattern in patterns:
+        if match := next(packages.glob(pattern), None):
+            return str(match)
+    return None
+
+
 def _download_simple_hls_over_http2(
     stream: StreamInfo, destination: Path, ffmpeg: str
 ) -> None:
-    curl = shutil.which("curl")
-    if curl is None:
-        raise FFmpegError(
-            "CDN이 HTTP/2를 요구하지만 curl을 찾을 수 없습니다"
-        )
-
-    playlist_command = _curl_command(curl, stream)
-    playlist_command.extend(
-        ["--silent", "--show-error", "--max-filesize", "5242880", stream.url]
-    )
+    headers = {"User-Agent": USER_AGENT}
+    if stream.referer:
+        headers["Referer"] = stream.referer
     try:
-        playlist_result = subprocess.run(
-            playlist_command, capture_output=True, text=True
+        playlist_response = curl_requests.get(
+            stream.url,
+            headers=headers,
+            impersonate="chrome",
+            timeout=30,
         )
-    except OSError as error:
-        raise FFmpegError(f"curl을 실행할 수 없습니다: {error}") from error
+        playlist_response.raise_for_status()
+    except curl_requests.RequestsError as error:
+        raise FFmpegError(f"HLS 재생목록 요청에 실패했습니다: {error}") from error
+    if len(playlist_response.content) > 5 * 1024 * 1024:
+        raise FFmpegError("HLS 재생목록 크기가 허용 범위를 초과합니다")
 
-    if playlist_result.returncode != 0:
-        detail = _last_error_line(playlist_result.stderr)
-        raise FFmpegError(f"HLS 재생목록 요청에 실패했습니다{detail}")
-
-    segment_urls = _parse_simple_media_playlist(stream.url, playlist_result.stdout)
+    segment_urls = _parse_simple_media_playlist(stream.url, playlist_response.text)
     temporary = destination.with_suffix(f"{destination.suffix}.segments.part")
     temporary_created = False
     try:
         completed_segments = 0
         _render_segment_progress(completed_segments, len(segment_urls))
-        with temporary.open("xb") as segment_file:
+        with temporary.open("wb") as segment_file:
             temporary_created = True
-            for offset in range(0, len(segment_urls), 10):
-                batch = segment_urls[offset : offset + 10]
-                segment_command = _curl_command(curl, stream)
-                segment_command.extend(["--silent", "--show-error", *batch])
-                segment_result = subprocess.run(
-                    segment_command, stdout=segment_file
-                )
-                if segment_result.returncode != 0:
+            for segment_url in segment_urls:
+                try:
+                    segment_response = curl_requests.get(
+                        segment_url,
+                        headers=headers,
+                        impersonate="chrome",
+                        timeout=30,
+                    )
+                    segment_response.raise_for_status()
+                except curl_requests.RequestsError as error:
                     print(file=sys.stderr)
                     raise FFmpegError(
-                        "HTTP/2 HLS 세그먼트 다운로드에 실패했습니다"
-                    )
-                completed_segments += len(batch)
+                        f"HTTP/2 HLS 세그먼트 다운로드에 실패했습니다: {error}"
+                    ) from error
+                segment_file.write(segment_response.content)
+                completed_segments += 1
                 _render_segment_progress(completed_segments, len(segment_urls))
 
         logger.info("다운로드한 세그먼트를 MP4로 병합합니다")
@@ -128,21 +150,6 @@ def _download_simple_hls_over_http2(
     finally:
         if temporary_created and temporary.exists():
             temporary.unlink()
-
-
-def _curl_command(curl: str, stream: StreamInfo) -> list[str]:
-    command = [
-        curl,
-        "--http2",
-        "--location",
-        "--fail",
-        "--fail-early",
-        "--user-agent",
-        USER_AGENT,
-    ]
-    if stream.referer:
-        command.extend(["--referer", stream.referer])
-    return command
 
 
 def _parse_simple_media_playlist(playlist_url: str, content: str) -> list[str]:

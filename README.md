@@ -24,6 +24,20 @@ streamgrab --help
 streamgrab --version
 ```
 
+## Windows 데스크톱 앱
+
+주소 입력, 저장 폴더 선택, 진행률 표시와 다운로드 취소를 지원하는 컴팩트한
+데스크톱 UI를 실행할 수 있습니다. HLS 영상에 FFmpeg가 필요하지만 설치되어 있지
+않다면 사용자 확인 후 WinGet으로 자동 설치하고 원래 다운로드를 다시 시작합니다.
+
+```powershell
+streamgrab-gui
+```
+
+독립 실행 파일이 필요하면 Windows Python 3.11 이상을 설치한 뒤
+`build_windows.bat`를 실행하세요. UNC 형식의 WSL 공유 경로도 스크립트가 임시
+드라이브로 연결하며, 빌드가 끝나면 `dist\StreamGrab.exe`가 생성됩니다.
+
 페이지에서 지원 스트림 확인:
 
 ```bash
@@ -44,7 +58,8 @@ DASH·브라우저 쿠키·DRM 콘텐츠는 지원하지 않습니다. 정적 �
 플레이어와 Cloudflare 보호 페이지를 분석합니다. 공식 impersonation 전송만
 사용하며 CAPTCHA나 로그인을 우회하지 않습니다.
 
-보호된 일반 페이지도 같은 명령을 사용합니다. 이 경로의 `-f`에는
+보호된 일반 페이지도 같은 명령을 사용합니다. HTTP/2 전용 HLS CDN은 외부 curl
+실행 파일 대신 패키지에 포함된 curl-cffi 전송 엔진을 사용합니다. 이 경로의 `-f`에는
 `--list-formats`에서 표시한 native format ID를 입력합니다.
 
 ```bash

@@ -111,3 +111,22 @@ def test_segment_progress_uses_single_carriage_return_line(capsys) -> None:
     progress = capsys.readouterr().err
     assert "\r다운로드 [###############---------------]  50.0%" in progress
     assert progress.endswith("100.0%\n")
+
+
+def test_find_ffmpeg_in_winget_packages(monkeypatch, tmp_path: Path) -> None:
+    executable = (
+        tmp_path
+        / "Microsoft"
+        / "WinGet"
+        / "Packages"
+        / "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
+        / "ffmpeg-8.0-full_build"
+        / "bin"
+        / "ffmpeg.exe"
+    )
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    monkeypatch.setattr(hls.shutil, "which", lambda _name: None)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    assert hls._find_ffmpeg() == str(executable)

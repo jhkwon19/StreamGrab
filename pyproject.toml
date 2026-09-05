@@ -18,6 +18,9 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 streamgrab = "streamgrab.cli:main"
 
+[project.gui-scripts]
+streamgrab-gui = "streamgrab.gui:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
