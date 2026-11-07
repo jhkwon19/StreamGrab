@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+from html import unescape
 from html.parser import HTMLParser
+import re
 from urllib.parse import urljoin, urlsplit
 
 from streamgrab.models import StreamInfo, StreamType
 
 
 _MEDIA_ATTRIBUTES = ("src", "data-source")
+_EMBEDDED_MEDIA_PATTERN = re.compile(
+    r"(?P<url>(?:https?:)?(?:\\?/){1,2}[^\"'<>\s]+?"
+    r"\.(?:m3u8|mpd|mp4|webm)(?:\?[^\"'<>\s]*)?)",
+    re.IGNORECASE,
+)
 
 
 class GenericExtractor:
@@ -18,6 +25,11 @@ class GenericExtractor:
         parser = _MediaHTMLParser()
         parser.feed(html)
         parser.close()
+
+        for match in _EMBEDDED_MEDIA_PATTERN.finditer(html):
+            parser.candidates.append(
+                (unescape(match.group("url")).replace("\\/", "/"), None)
+            )
 
         default_title = parser.document_title or _title_from_url(page_url)
         streams: list[StreamInfo] = []
@@ -48,6 +60,27 @@ class GenericExtractor:
 
         return streams
 
+    def iframe_urls(self, page_url: str, html: str) -> list[str]:
+        parser = _MediaHTMLParser()
+        parser.feed(html)
+        parser.close()
+        urls: list[str] = []
+        seen: set[str] = set()
+        for source in parser.iframes:
+            absolute = urljoin(page_url, source.strip())
+            parsed = urlsplit(absolute)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or absolute in seen
+            ):
+                continue
+            seen.add(absolute)
+            urls.append(absolute)
+        return urls
+
 
 def detect_stream_type(url: str) -> StreamType | None:
     path = urlsplit(url).path.lower()
@@ -64,6 +97,7 @@ class _MediaHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.candidates: list[tuple[str, str | None]] = []
+        self.iframes: list[str] = []
         self.document_title = ""
         self._inside_title = False
         self._title_parts: list[str] = []
@@ -81,6 +115,18 @@ class _MediaHTMLParser(HTMLParser):
             self._add_candidates(attributes, self._video_title)
         elif tag == "source":
             self._add_candidates(attributes, self._video_title)
+        elif (
+            tag == "link"
+            and (attributes.get("rel") or "").lower() == "preload"
+            and (attributes.get("as") or "").lower() in {"fetch", "video"}
+        ):
+            href = attributes.get("href")
+            if href:
+                self.candidates.append((href, None))
+        elif tag == "iframe":
+            source = attributes.get("src") or attributes.get("data-src")
+            if source:
+                self.iframes.append(source)
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "title":

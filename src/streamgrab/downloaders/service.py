@@ -13,7 +13,7 @@ from streamgrab.models import StreamInfo, StreamType
 def download_stream(stream: StreamInfo, destination: Path, timeout: float) -> None:
     if stream.stream_type is StreamType.DIRECT:
         download_direct(stream, destination, timeout)
-    elif stream.stream_type is StreamType.HLS:
+    elif stream.stream_type in {StreamType.HLS, StreamType.DASH}:
         download_hls(stream, destination)
     else:
         raise UnsupportedStreamError(f"아직 지원하지 않는 스트림: {stream.stream_type.value}")

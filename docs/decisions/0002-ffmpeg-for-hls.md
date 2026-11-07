@@ -1,29 +1,33 @@
-# ADR 0002: HLS 저장에 FFmpeg 사용
+# ADR 0002: HLS와 DASH 저장에 FFmpeg 사용
 
-- 상태: 승인
+- 상태: 승인, 0.3 구현 반영
 - 날짜: 2026-08-18
+- 최근 검토: 2026-11-07
 
 ## 배경
 
-HLS는 마스터·미디어 재생목록, 세그먼트, 영상과 음성 변형 등 직접 구현할 때
-고려할 요소가 많다. 초기 버전은 안정적인 수직 기능을 작은 코드로 검증해야 한다.
+HLS와 DASH는 manifest, 세그먼트, 영상·음성 트랙, 컨테이너 처리까지 직접 구현할
+경우 범위가 크다. StreamGrab은 프로토콜 구현보다 스트림 발견과 안전한 사용자
+흐름에 집중한다.
 
 ## 결정
 
-- HLS 입력과 MP4 stream copy는 FFmpeg에 맡긴다.
-- 외부 명령은 `shell=False`인 인자 배열로 실행한다.
-- 페이지 URL은 Referer로, 고정 애플리케이션 User-Agent는 User-Agent 옵션으로
-  전달한다.
-- 기본적으로 재인코딩하지 않고 `-c copy`를 사용한다.
-- 기존 파일은 덮어쓰지 않는다.
-- FFmpeg의 HTTP/1.1 요청만 403으로 거부되는 경우, 단순한 비암호화 TS-HLS에
-  한해 curl의 HTTP/2 전송 후 로컬 FFmpeg 병합으로 전환한다.
+- HLS와 DASH 입력 및 MP4 stream copy는 FFmpeg에 맡긴다.
+- 외부 명령은 셸 없이 인자 배열로 실행한다.
+- Extractor가 수집한 Referer와 User-Agent를 FFmpeg 입력에 전달한다.
+- 기본 저장은 `-map 0 -c copy`로 재인코딩을 피한다.
+- 기존 출력 파일은 덮어쓰지 않는다.
+- FFmpeg가 비표준 HLS 조각 확장자를 거부하면 관련 오류일 때만 확장자 호환 옵션으로
+  한 번 재시도한다.
+- FFmpeg HTTP/1.1 요청만 403으로 거부되는 경우 단순 비암호화 MPEG-TS HLS에 한해
+  curl-cffi로 조각을 전송하고 FFmpeg로 로컬 remux한다.
 
 ## 결과
 
-HLS 프로토콜 처리의 초기 복잡도를 줄이고 검증된 미디어 도구를 활용할 수 있다.
-대신 FFmpeg 설치가 필요하며, 이후 품질 선택을 위해 마스터 재생목록 메타데이터는
-StreamGrab이 별도로 분석해야 한다. DRM 해제 기능은 추가하지 않는다.
+검증된 미디어 도구로 HLS master와 DASH 트랙 처리를 위임할 수 있지만 FFmpeg가
+필수 외부 의존성이 된다. Windows GUI는 FFmpeg가 없을 때 사용자 확인 후 WinGet
+설치를 제공한다.
 
-HTTP/2 호환 경로는 마스터 재생목록, 암호화, fMP4 초기화 세그먼트 및 byte-range를
-만나면 추측하여 처리하지 않고 명확한 미지원 오류를 반환한다.
+HTTP/2 호환 경로는 master playlist, 암호화, fMP4 초기화 조각과 byte-range를
+지원하지 않는다. 이 경우 범용 FFmpeg 경로가 실패하면 명확한 오류를 반환하며 DRM
+해제나 추측성 복호화는 하지 않는다.

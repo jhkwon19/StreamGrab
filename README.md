@@ -1,10 +1,59 @@
 # StreamGrab
 
-StreamGrab은 웹페이지에서 사용자가 접근할 수 있는 영상 스트림을 찾아 로컬에
-저장하는 범용 CLI 도구를 목표로 합니다. 현재는 프로젝트 기반을 구축한 초기
-개발 단계입니다.
+StreamGrab은 웹페이지에서 사용자가 접근할 수 있는 영상 스트림을 찾아 저장하고,
+필요하면 TV 호환 코덱으로 변환하는 Windows 데스크톱 앱 겸 Python CLI입니다.
+현재 버전은 `0.3.0`입니다.
 
-## 개발 환경 준비
+DRM 해제, 로그인 우회, CAPTCHA 자동 우회 기능은 제공하지 않습니다. 본인이 저장할
+권한이 있거나 공개적으로 저장이 허용된 콘텐츠에만 사용해야 하며, 서비스 약관과
+저작권은 사용자가 확인해야 합니다.
+
+## 주요 기능
+
+- MP4·WebM 직접 미디어 저장
+- FFmpeg를 이용한 HLS(`.m3u8`) 및 DASH(`.mpd`) 저장
+- HTML 미디어 태그, preload, 스크립트 문자열과 iframe 정적 분석
+- YouTube 및 일반 보호 페이지의 yt-dlp 백엔드
+- 정적 분석과 yt-dlp가 실패할 때 Edge/Chrome 네트워크 요청 분석
+- Cloudflare 사용자 확인이 필요할 때 전용 브라우저 창으로 이어서 분석
+- Mingky 계열 `/movie/{id}` 페이지의 공개 API·임베드 플레이어 분석
+- H.264/H.265 영상과 AAC/MP3/AC-3 오디오 선택 및 변환
+- 기존 영상 파일의 일괄 코덱 변환
+- 배포 앱의 yt-dlp 자동 업데이트
+
+## Windows 데스크톱 앱
+
+배포 폴더의 `StreamGrab.exe`를 실행합니다. **다운로드** 탭에서는 영상 주소, 저장
+폴더, 영상·오디오 코덱을 선택할 수 있습니다. **코덱 변환** 탭에서는 기존 파일을
+여러 개 추가해 원본을 유지한 채 변환 사본을 만듭니다. 마지막으로 선택한 폴더와
+코덱은 `%LOCALAPPDATA%\StreamGrab\settings.json`에 저장됩니다.
+
+기본 영상 코덱은 호환성이 높은 H.264이고 기본 오디오는 AAC입니다. 원본 코덱을
+유지하려면 영상 코덱에서 `원본 유지`를 선택합니다. TV에서 소리가 나지 않는 경우
+MP3 또는 AC-3를 선택할 수 있습니다.
+
+HLS·DASH 저장, 영상·음성 병합 또는 코덱 변환에 FFmpeg가 필요합니다. Windows
+앱은 FFmpeg가 없을 때 사용자 확인을 받은 뒤 WinGet으로 설치하고 작업을 다시
+시도합니다.
+
+### 브라우저 확인 창
+
+일반 HTTP 분석으로 접근할 수 없는 페이지는 설치된 Edge 또는 Chrome을 마지막
+분석 단계에서 사용합니다. 먼저 숨김 브라우저로 시도하고, Cloudflare 사용자
+확인이 감지되면 전용 창이 나타납니다. 확인이 끝나면 영상 요청을 감지하고 창을
+자동으로 닫습니다. 창이 닫힌 뒤 GUI가 다운로드 진행률로 바뀌면 정상 동작입니다.
+
+전용 프로필은 일반 브라우저 프로필과 분리되어 있으며 다음 위치에 유지됩니다.
+
+```text
+%LOCALAPPDATA%\StreamGrab\browser-profile
+```
+
+확인 상태를 초기화하려면 StreamGrab 작업이 없는 상태에서 이 폴더를 삭제할 수
+있습니다. 로그인 정보가 필요한 사이트의 기존 사용자 프로필이나 쿠키를 자동으로
+가져오지는 않습니다.
+
+## CLI 설치와 실행
 
 Python 3.11 이상이 필요합니다.
 
@@ -14,129 +63,113 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 ```
 
-Windows PowerShell에서는 가상 환경 활성화 명령으로
-`.venv\Scripts\Activate.ps1`을 사용합니다.
-
-## 실행
+Windows PowerShell에서는 `.venv\Scripts\Activate.ps1`로 가상 환경을 활성화합니다.
 
 ```bash
 streamgrab --help
 streamgrab --version
+streamgrab 'https://example.com/watch/1' --list-formats
+streamgrab 'https://example.com/watch/1' -o ./downloads
 ```
 
-## Windows 데스크톱 앱
+일반 페이지의 `-f` 값은 `--list-formats`에 표시된 1부터 시작하는 스트림
+번호입니다. YouTube와 yt-dlp fallback 경로에서는 `137+140` 같은 yt-dlp native
+format ID를 사용합니다.
 
-주소 입력, 저장 폴더 선택, 진행률 표시와 다운로드 취소를 지원하는 컴팩트한
-데스크톱 UI를 실행할 수 있습니다. HLS 영상에 FFmpeg가 필요하지만 설치되어 있지
-않다면 사용자 확인 후 WinGet으로 자동 설치하고 원래 다운로드를 다시 시작합니다.
-
-```powershell
-streamgrab-gui
+```bash
+streamgrab 'https://www.youtube.com/watch?v=VIDEO_ID' --list-formats
+streamgrab 'https://www.youtube.com/watch?v=VIDEO_ID' -f '137+140' -o ./downloads
 ```
 
-**다운로드** 탭에서 저장 코덱(H.264 권장, H.265, 원본)을 고를 수 있고,
-**코덱 변환** 탭에서는 이미 받은 영상을 골라 원본을 유지한 채 H.264/H.265 사본을
-만듭니다. TV에서 VP9·AV1 영상이 재생되지 않을 때 사용하세요.
+영상과 오디오 코덱을 지정할 수 있습니다.
 
-독립 실행 파일이 필요하면 Windows Python 3.11 이상을 설치한 뒤
-`build_windows.bat`를 실행하세요. UNC 형식의 WSL 공유 경로도 스크립트가 임시
-드라이브로 연결하며, 빌드가 끝나면 `dist\StreamGrab\StreamGrab.exe`가 생성됩니다.
-`dist\StreamGrab` 폴더째 복사해서 사용하세요.
+```bash
+streamgrab URL --codec h264 --audio aac
+streamgrab URL --codec h265 --audio ac3
+streamgrab URL --codec original
+```
 
-### yt-dlp 자동 업데이트
+기존 파일은 원본을 유지한 채 변환합니다. `--convert`에는 `original`을 사용할 수
+없습니다.
 
-실행 파일에는 빌드 시점의 yt-dlp가 비상용으로 들어 있고, 앱은 실행할 때마다(하루
-한 번) PyPI에서 최신 정식 버전을 확인해 실행 파일 옆 `yt-dlp\` 폴더에 설치합니다.
-내려받은 파일은 SHA-256으로 검증하고 별도 프로세스에서 불러오기 점검을 통과해야만
-`current.txt`가 새 버전을 가리키며, 다음 다운로드부터 바로 적용됩니다. 최근 두
-버전만 보관하고, 폴더를 지우면 내장 버전으로 돌아갑니다. 폴더에 쓸 수 없으면
+```bash
+streamgrab --convert video1.mkv video2.webm --codec h264 --audio mp3
+streamgrab --convert video.mkv --codec h265 -o ./converted
+```
+
+출력 경로가 디렉터리이면 안전하게 정제한 제목을 파일명으로 사용합니다. 같은
+파일이 있으면 `(1)`, `(2)`를 붙이며 기존 파일을 덮어쓰지 않습니다.
+
+## 설정 파일
+
+설정 파일은 자동 탐색하지 않으며 `--config`로 명시해야 합니다.
+
+```bash
+streamgrab URL --config streamgrab.toml
+```
+
+현재 다운로드 흐름에 적용되는 설정은 다음 두 가지입니다.
+
+```toml
+output_directory = "downloads"
+
+[network]
+timeout = 30
+```
+
+파서는 이전 설정과의 호환을 위해 `default_quality`와 `retry.count`도 읽지만 현재
+다운로드 선택과 재시도에는 사용하지 않습니다.
+
+## yt-dlp 업데이트
+
+Windows 배포 앱에는 빌드 시점의 yt-dlp가 비상용으로 포함됩니다. 앱은 하루 한 번
+PyPI의 최신 정식 버전을 확인해 실행 파일 옆 `yt-dlp\`에 설치합니다. wheel의
+SHA-256을 검증하고 별도 프로세스의 import 점검이 성공한 뒤에만 새 버전으로
+전환하며 최근 두 설치를 보관합니다. 해당 위치에 쓸 수 없으면
 `%LOCALAPPDATA%\StreamGrab\yt-dlp\`를 사용합니다.
 
 ```text
 StreamGrab\
 ├─ StreamGrab.exe
 └─ yt-dlp\
-   ├─ current.txt        # 사용 중인 버전 폴더 이름
-   ├─ state.json         # 마지막 확인 시각
-   └─ 2026.10.26\        # yt_dlp + yt_dlp_ejs + manifest.json
+   ├─ current.txt
+   ├─ state.json
+   └─ 2026.10.26\
 ```
 
-curl-cffi, brotli, certifi 같은 의존 패키지는 실행 파일에 포함되어 있으므로
-이들의 보안 업데이트는 `build_windows.bat`로 다시 빌드해야 반영됩니다.
-명령줄에서는 `--update-ytdlp [--force]`, `--ytdlp-status`로 같은 작업을 할 수
-있습니다.
-
-페이지에서 지원 스트림 확인:
+GUI 상태 표시줄의 **업데이트 확인** 버튼으로 즉시 확인할 수 있습니다. 내부 유지
+보수 명령은 다음과 같습니다.
 
 ```bash
-streamgrab 'https://example.com/video' --list-formats
+python -m streamgrab --ytdlp-status
+python -m streamgrab --update-ytdlp --force
 ```
 
-첫 번째 스트림 저장:
+YouTube의 JavaScript challenge 전체 지원에는 Deno 2.3 이상 또는 Node.js 22
+이상이 필요할 수 있습니다. StreamGrab은 PATH를 먼저 확인하고 Windows NVM 설치가
+있으면 지원되는 최신 Node.js를 선택합니다.
 
-```bash
-streamgrab 'https://example.com/video'
-streamgrab 'https://example.com/video' -f 1 -o ./downloads
+## Windows 실행 파일 빌드
+
+Windows Python 3.11 이상과 Python Launcher가 설치된 환경에서 실행합니다.
+
+```bat
+build_windows.bat
 ```
 
-현재 버전은 정적 HTML의 `<video src>`, `<video data-source>`, `<source src>`를
-분석합니다. MP4/WebM 직접 미디어와 FFmpeg를 이용한 HLS 저장을 지원하며,
-DASH·브라우저 쿠키·DRM 콘텐츠는 지원하지 않습니다. 정적 분석이 네트워크 차단
-또는 미디어 미발견으로 끝나면 yt-dlp Generic Extractor로 한 번 전환해 iframe
-플레이어와 Cloudflare 보호 페이지를 분석합니다. 공식 impersonation 전송만
-사용하며 CAPTCHA나 로그인을 우회하지 않습니다.
+결과는 `dist\StreamGrab\StreamGrab.exe`에 생성됩니다. 자동 업데이트 폴더를 함께
+유지하려면 `dist\StreamGrab` 폴더째 복사해 사용합니다.
 
-보호된 일반 페이지도 같은 명령을 사용합니다. HTTP/2 전용 HLS CDN은 외부 curl
-실행 파일 대신 패키지에 포함된 curl-cffi 전송 엔진을 사용합니다. 이 경로의 `-f`에는
-`--list-formats`에서 표시한 native format ID를 입력합니다.
-
-```bash
-streamgrab 'https://example.com/protected-video' --list-formats
-streamgrab 'https://example.com/protected-video' -f '4731' -o ./downloads
-```
-
-## YouTube
-
-YouTube는 유지보수되는 `yt-dlp` 백엔드로 처리합니다.
-
-```bash
-streamgrab 'https://www.youtube.com/watch?v=VIDEO_ID' --list-formats
-streamgrab 'https://www.youtube.com/watch?v=VIDEO_ID' -o ./downloads
-streamgrab 'https://www.youtube.com/watch?v=VIDEO_ID' -f '137+140' -o ./downloads
-```
-
-기본값은 가능한 최고 품질의 MP4 영상과 M4A 오디오를 우선 선택하고 FFmpeg로
-병합합니다. 최신 YouTube JavaScript challenge의 전체 형식을 사용하려면 Deno
-2.3 이상(권장) 또는 Node.js 22 이상이 필요합니다. 런타임이 없더라도 yt-dlp가
-제공하는 제한된 형식으로 동작을 시도합니다.
-
-StreamGrab은 PATH의 런타임을 먼저 확인하고, NVM을 사용한다면 설치된 Node.js
-22 이상 중 가장 최신 버전을 자동으로 선택합니다.
-
-2026년 8월 안정판 `2026.7.4`에는 일부 YouTube 미디어 전송이 403으로 끝나는
-문제가 있어, 이를 해결한 `2026.8.18.122307.dev0` 이상을 최소 버전으로 사용합니다.
-Cloudflare impersonation용 `curl-cffi`도 함께 설치합니다. 기존 개발 환경은 다음
-명령으로 의존성을 갱신할 수 있습니다.
-
-```bash
-pip install --upgrade --pre -e '.[dev]'
-```
-
-StreamGrab은 본인이 저장할 권한이 있거나 공개적으로 저장이 허용된 콘텐츠에만
-사용해야 합니다. 서비스 이용약관과 저작권은 사용자가 확인해야 합니다.
-
-## 테스트
+## 테스트와 문서
 
 ```bash
 pytest
 ```
 
-프로젝트의 전체 방향은 [PROJECT.md](PROJECT.md), 현재 할 일은
-[TODO.md](TODO.md), 진행 기록은 [docs/development.md](docs/development.md)를
-참조하세요.
-
-버전별 변경 사항은 [CHANGELOG.md](CHANGELOG.md)와
-[v0.2.0 릴리스 노트](docs/releases/0.2.0.md)에 정리되어 있습니다.
-
-다양한 플레이어 구조와 여러 영상·품질을 처리하는 확장 원칙은
-[스트림 분석 파이프라인](docs/extraction-pipeline.md)에 정리되어 있습니다.
+- [현재 제품 사양](PROJECT.md)
+- [문서 안내](docs/README.md)
+- [아키텍처](docs/architecture.md)
+- [스트림 분석 파이프라인](docs/extraction-pipeline.md)
+- [개발과 검증](docs/development.md)
+- [작업 목록](TODO.md)
+- [변경 이력](CHANGELOG.md)

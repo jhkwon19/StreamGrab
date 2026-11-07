@@ -20,4 +20,5 @@ class StreamInfo:
     title: str
     stream_type: StreamType
     referer: str | None = None
+    user_agent: str | None = None
 

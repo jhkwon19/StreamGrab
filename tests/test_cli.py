@@ -6,7 +6,7 @@ import pytest
 
 from streamgrab import cli
 from streamgrab.cli import main
-from streamgrab.exceptions import NetworkError, StreamNotFoundError
+from streamgrab.exceptions import DownloadError, NetworkError, StreamNotFoundError
 
 
 def test_cli_without_arguments_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
@@ -119,3 +119,36 @@ def test_cli_lists_ytdlp_formats_after_static_extraction_fails(
 
     assert main(["https://embedded.example/watch", "--list-formats"]) == 0
     assert called == ["https://embedded.example/watch"]
+
+
+def test_cli_uses_browser_network_after_ytdlp_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "is_youtube_url", lambda url: False)
+    monkeypatch.setattr(
+        cli,
+        "_find_streams",
+        lambda url, timeout: (_ for _ in ()).throw(StreamNotFoundError("static")),
+    )
+    monkeypatch.setattr(
+        cli,
+        "list_generic_formats",
+        lambda url: (_ for _ in ()).throw(DownloadError("yt-dlp")),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_find_browser_streams",
+        lambda url, timeout: [
+            StreamInfo(
+                url="https://media.example/dynamic.m3u8",
+                title="Dynamic video",
+                stream_type=StreamType.HLS,
+                referer=url,
+            )
+        ],
+    )
+
+    assert main(["https://dynamic.example/watch", "--list-formats"]) == 0
+    output = capsys.readouterr().out
+    assert "Dynamic video" in output
+    assert "hls" in output

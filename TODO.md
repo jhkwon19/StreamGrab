@@ -1,72 +1,62 @@
 # StreamGrab 작업 목록
 
-완료 여부는 코드와 테스트로 검증하며, 세부 진행 내용은
-`docs/development.md`에 기록한다.
+현재 코드에 남아 있는 작업만 기록합니다. 완료된 구현의 설명은
+`CHANGELOG.md`와 `docs/development.md`에서 확인합니다.
 
-## 현재 — Phase 1
+## 우선순위 높음
 
-- [x] Python 패키지와 CLI 진입점 구성
-- [x] 기본 로깅 구성
-- [x] TOML 설정 모델과 검증 구성
-- [x] pytest 테스트 환경 구성
-- [ ] CI에서 테스트 자동 실행
+- [ ] CI에서 Python 3.11 이상 테스트 자동 실행
+- [ ] HLS 마스터 재생목록의 variant 해상도·대역폭 분석과 품질 선택
+- [ ] 여러 영상과 같은 영상의 여러 품질을 구분하는 후보 모델
+- [ ] 일반 후보 목록에 해상도·코덱·발견 출처 표시
+- [ ] 네트워크 재시도 정책을 실제 `retry.count` 설정과 연결
+- [ ] 사용하지 않는 `default_quality` 설정을 구현하거나 제거
 
-## 다음 — Phase 2: Direct Media
+## 다운로드 안정성
 
-- [x] `StreamInfo` 공통 데이터 모델 정의
-- [x] 기본 URL과 HTTP 응답 검증
-- [x] MP4/WebM 직접 다운로드 구현
-- [x] 안전한 파일명과 중복 파일 정책 구현
-- [x] HTTP/2 HLS 호환 경로의 단일 전체 진행률 구현
-- [ ] 직접 미디어 및 FFmpeg 기본 경로의 바이트 기반 진행률 구현
+- [x] 직접 미디어 바이트 진행률
+- [x] HLS 비표준 세그먼트 확장자 재시도
+- [x] 취소 시 GUI 작업 프로세스 트리와 변환 임시 파일 정리
+- [ ] 모든 다운로드 경로의 `.part` 정리 정책 통일
+- [ ] Content-Length가 없는 직접 미디어의 전송량·속도 표시
+- [ ] HTTP 응답 MIME 및 최종 파일 유효성 검증 강화
+- [ ] HLS 암호화와 DRM을 구분하는 오류 메시지
 
-## Phase 3~4 기초
+## Extractor와 브라우저
 
-- [x] 표준 HTML 미디어 태그 Generic Extractor 구현
-- [x] FFmpeg 기반 기본 HLS 저장 구현
-- [x] HTTP/2 전용 CDN용 단순 TS-HLS 호환 경로 구현
-- [ ] HLS 마스터 재생목록 품질 목록 분석
-- [ ] HLS 암호화 및 DRM 감지 후 명확한 오류 제공
-- [ ] HTTP 재시도와 응답 헤더 검증 강화
-- [ ] 다운로드 중단 시 임시 파일 정리 정책 통일
+- [x] 정적 HTML·스크립트·preload 분석
+- [x] 깊이 제한 iframe 탐색
+- [x] Mingky 공개 API Site Extractor
+- [x] Edge/Chrome CDP 네트워크 fallback
+- [x] Cloudflare 사용자 확인과 전용 프로필 재사용
+- [x] Edge 런처 hand-off와 고립 프로세스 회귀 수정
+- [ ] Site Extractor가 더 늘어날 때 공통 Protocol과 Registry 도입
+- [ ] 익명화한 HTML·manifest·CDP 이벤트 fixture 확대
+- [ ] 명시적인 쿠키 파일 또는 사용자 승인 기반 브라우저 쿠키 입력 설계
+- [ ] 브라우저 분석 타임아웃과 단계별 진단 메시지 개선
 
-## Extractor 확장
+## 플랫폼과 유지보수
 
-- [ ] JSON-LD 및 페이지 내 JSON 미디어 후보 분석
-- [ ] 알려진 JavaScript 플레이어 설정의 안전한 정적 분석
-- [ ] 제한된 깊이의 iframe 재귀 분석
-- [ ] 콘텐츠 그룹과 품질 variant를 표현하는 모델 추가
-- [ ] 여러 영상과 여러 품질을 구분하는 CLI 출력
-- [ ] 두 번째 독립 Extractor 추가 시 Protocol과 Registry 도입
-- [ ] Extractor별 발견 근거와 진단 로그 추가
-- [ ] 익명화된 구조별 HTML/manifest fixture 모음 구축
+- [x] YouTube 및 일반 페이지 yt-dlp 백엔드
+- [x] 배포 앱의 검증된 yt-dlp 자동 업데이트와 폴백
+- [x] PATH/NVM Node.js 런타임 탐색
+- [ ] Deno/Node 런타임 상태 진단 화면
+- [ ] 여러 embedded video를 반환하는 yt-dlp 결과의 선택 정책
+- [ ] 로그인·연령 제한 콘텐츠용 명시적 cookie 옵션 검토
+- [ ] playlist 다운로드는 별도 명령과 확인 절차로 설계
 
-## 이후
+## 사용자 경험
 
-- [ ] DASH 다운로드 구현
-- [ ] 브라우저 기반 분석 검토
-- [ ] 사이트별 플러그인 구조 구현
-- [x] 컴팩트한 Windows 데스크톱 UI와 단일 EXE 빌드
-- [x] GUI에서 FFmpeg 자동 설치 후 다운로드 재시도
-
-## 플랫폼 백엔드
-
-- [x] yt-dlp 기반 YouTube URL 감지와 다운로드
-- [x] YouTube 형식 목록과 native format ID 선택
-- [x] YouTube 영상·음성 전체 바이트 진행률 통합
-- [x] YouTube fragment 진행률 역행 및 병합 안내 중복 방지
-- [x] yt-dlp 로그의 서명 query 마스킹
-- [x] PATH 및 NVM에서 지원되는 Node.js 22+ 자동 탐색
-- [x] 정적 분석 실패 시 yt-dlp Generic Extractor fallback
-- [x] curl-cffi 기반 Cloudflare impersonation 지원
-- [ ] Deno/Node 런타임 진단 명령 추가
-- [ ] Generic fallback에서 여러 embedded video 선택 정책 설계
-- [ ] YouTube 로그인·연령 제한용 명시적 cookie 옵션 검토
-- [ ] YouTube playlist는 별도 명령과 확인 절차로 설계
-- [ ] YouTube 자막 저장 기능 설계 시 기존 transcript API 경험 검토
+- [x] 다운로드·코덱 변환 Windows GUI
+- [x] 영상·오디오 코덱 선택과 마지막 설정 기억
+- [x] FFmpeg WinGet 설치 후 작업 재시도
+- [x] 직접 다운로드와 변환 진행률 표시
+- [ ] 실패 보고서 내보내기 또는 민감정보를 제거한 진단 로그
+- [ ] 다운로드 큐와 완료 기록
+- [ ] 접근성 및 고해상도 DPI 점검
 
 ## 장기 검토
 
 - [ ] Web UI
-- [ ] Docker 지원
-- [ ] 다운로드 큐와 기록
+- [ ] Docker/서버 모드의 필요성 검토
+- [ ] 공개 Python API를 제공할 경우 안정된 인터페이스 정의

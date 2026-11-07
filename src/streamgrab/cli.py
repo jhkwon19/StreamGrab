@@ -6,7 +6,6 @@ import argparse
 import logging
 from pathlib import Path
 from typing import Sequence
-from urllib.parse import unquote, urlsplit
 
 from streamgrab import __version__
 from streamgrab.backends.youtube import (
@@ -26,8 +25,7 @@ from streamgrab.exceptions import (
     StreamGrabError,
     StreamNotFoundError,
 )
-from streamgrab.extractors import GenericExtractor
-from streamgrab.extractors.generic import detect_stream_type
+from streamgrab.extractors import ExtractionPipeline
 from streamgrab.filenames import output_path
 from streamgrab.transcode import (
     AUDIO_CODECS,
@@ -40,7 +38,6 @@ from streamgrab.transcode import (
 from streamgrab.gui_support import configure_output_streams
 from streamgrab.logging import configure_logging
 from streamgrab.models import StreamInfo
-from streamgrab.network import fetch_page, validate_http_url
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -139,17 +136,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             streams = _find_streams(args.url, config.network_timeout)
         except (NetworkError, StreamNotFoundError):
-            if args.list_formats:
-                list_generic_formats(args.url)
-            else:
-                download_generic(
-                    args.url,
-                    args.output or config.output_directory,
-                    args.format,
-                    args.codec,
-                    args.audio,
-                )
-            return 0
+            try:
+                if args.list_formats:
+                    list_generic_formats(args.url)
+                else:
+                    download_generic(
+                        args.url,
+                        args.output or config.output_directory,
+                        args.format,
+                        args.codec,
+                        args.audio,
+                    )
+                return 0
+            except (StreamGrabError, OSError) as backend_error:
+                logger.info("yt-dlp 분석 실패 후 브라우저 네트워크 분석을 시도합니다")
+                try:
+                    streams = _find_browser_streams(
+                        args.url, config.network_timeout
+                    )
+                except (StreamGrabError, OSError) as browser_error:
+                    raise StreamNotFoundError(
+                        "모든 자동 분석 단계에서 영상을 찾지 못했습니다. "
+                        f"yt-dlp: {backend_error}; 브라우저: {browser_error}"
+                    ) from browser_error
         if args.list_formats:
             _print_streams(streams)
             return 0
@@ -163,10 +172,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         destination = output_path(
             selected, args.output or config.output_directory
         )
-        print(f"저장 시작: {destination}")
+        print(f"저장 시작: {destination}", flush=True)
         download_stream(selected, destination, config.network_timeout)
         destination = ensure_video_codec(destination, args.codec, audio_codec=args.audio)
-        print(f"저장 완료: {destination}")
+        print(f"저장 완료: {destination}", flush=True)
         return 0
     except (StreamGrabError, OSError) as error:
         logger.error("%s", error)
@@ -195,17 +204,11 @@ def _convert_files(
 
 
 def _find_streams(url: str, timeout: float) -> list[StreamInfo]:
-    validate_http_url(url)
-    direct_type = detect_stream_type(url)
-    if direct_type is not None:
-        title = unquote(Path(urlsplit(url).path).stem) or "video"
-        return [StreamInfo(url=url, title=title, stream_type=direct_type)]
+    return ExtractionPipeline().extract_static(url, timeout)
 
-    page = fetch_page(url, timeout)
-    streams = GenericExtractor().extract(page.url, page.text)
-    if not streams:
-        raise StreamNotFoundError("지원하는 영상 스트림을 찾지 못했습니다")
-    return streams
+
+def _find_browser_streams(url: str, timeout: float) -> list[StreamInfo]:
+    return ExtractionPipeline().extract_browser(url, timeout)
 
 
 def _print_streams(streams: list[StreamInfo]) -> None:

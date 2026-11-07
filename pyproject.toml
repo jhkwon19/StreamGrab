@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "streamgrab"
 version = "0.3.0"
-description = "Extensible command-line tool for analyzing and saving web media streams"
+description = "Windows desktop and CLI tool for analyzing, saving, and converting web media"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -15,6 +15,7 @@ dependencies = [
     "curl-cffi>=0.17.0",
     "brotli>=1.2.1",
     "certifi>=2026.10.23",
+    "websockets>=13.0",
 ]
 
 [project.optional-dependencies]

@@ -1,7 +1,8 @@
 from pathlib import Path
+from io import BytesIO
 import subprocess
 
-from streamgrab.downloaders import hls
+from streamgrab.downloaders import direct, hls
 from streamgrab.exceptions import FFmpegError
 from streamgrab.models import StreamInfo, StreamType
 
@@ -104,12 +105,80 @@ def test_hls_downloader_falls_back_when_ffmpeg_gets_403(
     }
 
 
+def test_hls_downloader_retries_disguised_segments(monkeypatch, tmp_path: Path) -> None:
+    stream = StreamInfo(
+        url="https://media.example/master.m3u8",
+        title="Example",
+        stream_type=StreamType.HLS,
+    )
+    commands: list[list[str]] = []
+    monkeypatch.setattr(hls.shutil, "which", lambda name: "/usr/bin/ffmpeg")
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if len(commands) == 1:
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stderr=(
+                    "URL segment.bin is not in allowed_segment_extensions; "
+                    "Invalid data found when processing input"
+                ),
+            )
+        return subprocess.CompletedProcess(command, 0, stderr="")
+
+    monkeypatch.setattr(hls.subprocess, "run", fake_run)
+
+    hls.download_hls(stream, tmp_path / "output.mp4")
+
+    assert len(commands) == 2
+    retry = commands[1]
+    assert retry[retry.index("-allowed_extensions") + 1] == "ALL"
+    assert retry[retry.index("-allowed_segment_extensions") + 1] == "ALL"
+    assert retry[retry.index("-extension_picky") + 1] == "0"
+    assert retry.index("-extension_picky") < retry.index("-i")
+
+
 def test_segment_progress_uses_single_carriage_return_line(capsys) -> None:
     hls._render_segment_progress(5, 10)
     hls._render_segment_progress(10, 10)
 
     progress = capsys.readouterr().err
     assert "\r다운로드 [###############---------------]  50.0%" in progress
+    assert progress.endswith("100.0%\n")
+
+
+def test_direct_downloader_reports_byte_progress(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    payload = b"0123456789"
+
+    class FakeResponse(BytesIO):
+        headers = {"Content-Length": str(len(payload))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+
+    monkeypatch.setattr(
+        direct,
+        "urlopen",
+        lambda _request, timeout: FakeResponse(payload),
+    )
+    stream = StreamInfo(
+        url="https://media.example/video.mp4",
+        title="Example",
+        stream_type=StreamType.DIRECT,
+    )
+    destination = tmp_path / "video.mp4"
+
+    direct.download_direct(stream, destination, timeout=10)
+
+    assert destination.read_bytes() == payload
+    progress = capsys.readouterr().err
+    assert "\r다운로드 [------------------------------]   0.0%" in progress
     assert progress.endswith("100.0%\n")
 
 

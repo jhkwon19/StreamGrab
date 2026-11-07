@@ -1,65 +1,150 @@
 # 아키텍처
 
-## 현재 범위
+이 문서는 StreamGrab 0.3.0의 실제 코드 구조를 설명합니다.
 
-StreamGrab은 CLI를 진입점으로 하는 Python 애플리케이션이다. 현재는 정적 HTML
-분석과 직접 미디어 및 HLS 저장이 연결된 첫 수직 기능 단위를 제공한다.
+## 실행 진입점
 
 ```text
-CLI
- ├─ Config (TOML 로딩과 검증)
- ├─ Network (제한된 크기의 HTML 요청)
- ├─ Generic Extractor
- │    └─ StreamInfo
- ├─ Platform Backend
- │    ├─ YouTube (yt-dlp adapter)
- │    └─ Protected/embedded generic page (yt-dlp + curl-cffi fallback)
- └─ Downloader
-      ├─ Direct (MP4, WebM)
-      └─ HLS (FFmpeg stream copy)
+Windows StreamGrab.exe ── Tkinter GUI (`streamgrab.gui`)
+                               │ worker subprocess (`--cli`)
+                               ▼
+Python console script ── `streamgrab.cli:main`
+                               ▲
+python -m streamgrab ── `streamgrab.__main__`
 ```
 
-## 모듈 경계
+`streamgrab.__main__`은 CLI 모듈을 import하기 전에 외부 yt-dlp 설치를 활성화합니다.
+`--ytdlp-status`, `--update-ytdlp`, 내부 self-test 같은 유지보수 명령도 이 단계에서
+처리합니다. GUI는 다운로드와 변환을 별도 worker 프로세스로 실행하므로 네트워크나
+FFmpeg 작업 중에도 응답합니다.
 
-- `cli`: 사용자 입력을 해석하고 작업 흐름을 연결한다.
-- `config`: 외부 설정을 내부의 검증된 값으로 변환한다.
-- `logging`: 애플리케이션 로그의 레벨과 출력 형식을 관리한다.
-- `exceptions`: 사용자에게 설명할 수 있는 예상 오류의 공통 계층이다.
-- `network`: 스크립트를 실행하지 않고 제한된 크기의 HTML을 가져온다.
-- `extractors`: 표준 미디어 속성에서 스트림 후보를 찾는다.
-- `downloaders`: 스트림 형식에 맞는 구현으로 파일을 저장한다.
-- `backends`: 변동이 크고 전문 유지보수가 필요한 플랫폼을 격리해 연결한다.
-- `filenames`: 운영체제에 안전하고 기존 파일을 덮어쓰지 않는 경로를 만든다.
+## 전체 실행 흐름
 
-Extractor는 파일을 저장하지 않고, Downloader는 웹페이지를 분석하지 않는다는
-경계를 유지한다.
+```text
+URL
+ ├─ YouTube 판별 성공
+ │    └─ YouTubeBackend (yt-dlp 분석·다운로드)
+ └─ 일반 URL
+      ├─ ExtractionPipeline.extract_static
+      │    ├─ 직접 미디어 URL
+      │    ├─ Generic HTML + iframe
+      │    └─ Mingky Site Extractor
+      ├─ 실패: Generic yt-dlp backend
+      └─ 다시 실패: BrowserNetworkExtractor
+            ├─ 숨김 Edge/Chrome CDP
+            └─ Cloudflare 감지 시 전용 표시 창
 
-다양한 페이지 구조의 분석 순서, 여러 영상·품질 그룹화, Site Extractor 추가
-기준은 [스트림 분석 파이프라인](extraction-pipeline.md)에 정의한다.
+StreamInfo 후보
+ ├─ direct ── urllib downloader
+ └─ HLS/DASH ── FFmpeg downloader
 
-## 의존성 원칙
+저장 결과
+ └─ 선택 코덱 검사 및 필요 시 FFmpeg 변환
+```
 
-표준 라이브러리로 충분한 동안 런타임 의존성을 추가하지 않는다. 새 의존성은
-구현할 기능, 대안, 유지 비용을 검토한 뒤 추가하고 중요한 선택은 ADR로 남긴다.
+일반 yt-dlp 백엔드는 형식 분석과 다운로드를 함께 수행하므로 `StreamInfo`와
+Downloader 경로를 거치지 않습니다. 이 차이는 전문 플랫폼 코드를 범용 Extractor와
+섞지 않기 위한 의도적인 경계입니다.
 
-## 현재 제한
+## 패키지 구조
 
-- JavaScript를 실행하거나 브라우저 네트워크 요청을 가로채지 않는다.
-- 쿠키, 로그인 세션, 프록시는 아직 지원하지 않는다.
-- HLS 품질 선택은 아직 재생목록 내부가 아닌 HTML에서 발견된 스트림 단위이다.
-- FFmpeg HTTP 요청이 403이고 CDN이 HTTP/2를 요구하면, 평문 TS-HLS에 한해
-  curl로 세그먼트를 전송한 뒤 FFmpeg로 로컬 병합한다.
-- DASH를 식별할 수 있지만 Downloader는 아직 없다.
-- DRM 해제와 접근 권한 우회는 프로젝트 범위에 포함하지 않는다.
+```text
+src/streamgrab/
+├─ __main__.py          런타임 활성화와 CLI 진입
+├─ cli.py               인자 처리와 상위 작업 흐름
+├─ gui.py               Tkinter 화면과 worker 수명 주기
+├─ gui_support.py       명령 구성, 진행률 파싱, 설정, 프로세스 종료
+├─ config.py            명시적 TOML 설정 로딩과 검증
+├─ models.py            StreamType, StreamInfo
+├─ network.py           크기 제한 HTML/JSON 요청과 URL 검증
+├─ filenames.py         안전한 파일명과 비덮어쓰기 경로
+├─ transcode.py         ffprobe, 영상·오디오 변환과 진행률
+├─ ytdlp_runtime.py     배포 앱 외부 yt-dlp 업데이트·활성화
+├─ extractors/
+│  ├─ pipeline.py       정적 단계 조정, 중복 제거와 정렬
+│  ├─ generic.py        HTML·스크립트·iframe 후보 발견
+│  ├─ mingky.py         Mingky 공개 API Site Extractor
+│  └─ browser.py        Chromium CDP 네트워크 분석
+├─ backends/
+│  ├─ youtube.py        YouTube yt-dlp adapter
+│  ├─ generic_ytdlp.py  일반 보호·임베드 페이지 fallback
+│  └─ ytdlp_common.py   형식, 출력, 진행률, 로그 공통 정책
+└─ downloaders/
+   ├─ service.py        StreamType별 구현 선택
+   ├─ direct.py         MP4/WebM HTTP 다운로드
+   └─ hls.py            HLS/DASH FFmpeg와 HLS 호환 경로
+```
 
-## 전문 플랫폼 백엔드
+## 공통 모델
 
-YouTube처럼 서명 해석, JavaScript challenge, 영상·음성 선택 규칙이 지속적으로
-변하는 플랫폼은 자체 Site Extractor로 복제하지 않는다. 검증된 외부 프로젝트를
-어댑터 뒤에 배치하고 CLI와 오류·진행률·출력 정책만 StreamGrab 방식으로
-정규화한다. 외부 백엔드에서 반환되는 서명 URL의 query는 로그에서 제거한다.
+Extractor와 Downloader 사이의 계약은 다음 값으로 제한됩니다.
 
-정적 Generic Extractor가 네트워크 차단 또는 미디어 미발견으로 끝난 경우에만
-yt-dlp Generic fallback을 호출한다. fallback은 `generic:impersonate`를 사용해
-지원되는 브라우저 TLS 지문으로 다시 요청하고 iframe 내부의 전문 extractor로
-위임한다. CAPTCHA, 로그인 또는 DRM 우회는 이 계층의 책임이 아니다.
+```python
+StreamInfo(
+    url="https://cdn.example/video.m3u8",
+    title="Video title",
+    stream_type=StreamType.HLS,
+    referer="https://example.com/watch/1",
+    user_agent="...",
+)
+```
+
+`referer`와 `user_agent`는 브라우저에서 성공한 요청 조건을 실제 다운로드에
+전달합니다. 현재 모델에는 해상도, 비트레이트, 콘텐츠 그룹 또는 발견 근거가
+없습니다.
+
+## 정적 분석 경계
+
+`ExtractionPipeline.extract_static`은 다음 제한을 둡니다.
+
+- 직접 `.mp4`, `.webm`, `.m3u8`, `.mpd` URL은 페이지 요청 없이 반환
+- HTML 응답 최대 10 MiB, JSON 응답 최대 2 MiB
+- iframe 깊이 최대 2, 전체 정적 페이지 최대 8
+- 발견 URL은 HTTP/HTTPS와 hostname을 요구
+- URL에 사용자 이름이나 비밀번호가 있으면 거부
+- 같은 완전한 URL은 처음 발견한 후보만 유지
+- HLS, DASH, direct 순서로 후보 정렬
+
+Mingky Site Extractor는 Generic 단계에서 후보를 찾지 못했고 입력 URL이 지원되는
+`mingky숫자.com/movie/{id}`일 때만 실행합니다.
+
+## 브라우저 분석
+
+`BrowserNetworkExtractor`는 설치된 Edge, Chrome 또는 Chromium을 찾고 임의의 로컬
+디버깅 포트에서 CDP에 연결합니다. OOPIF를 포함한 page/iframe target에 Network
+도메인을 활성화하고 URL 확장자, 응답 MIME, Media resource type으로 HLS, DASH,
+direct 후보를 판별합니다. 알려진 플레이어 버튼과 `<video>`의 재생도 시도합니다.
+
+프로필은 Windows에서 `%LOCALAPPDATA%\StreamGrab\browser-profile`, 그 외 환경에서
+`~/.cache/streamgrab/browser-profile`을 사용합니다. 일반 사용자 프로필을 열지
+않습니다. 분석 후 브라우저 websocket의 `Browser.close`를 호출하고 launcher
+프로세스도 정리합니다. Edge가 실제 브라우저로 hand-off하면서 최초 launcher가
+종료되는 것은 실패로 간주하지 않고 디버깅 포트 제한 시간까지 기다립니다.
+
+## 저장과 변환
+
+- direct: 1 MiB 단위로 `.part`에 기록하고 완료 뒤 원자적으로 최종 이름으로 이동
+- HLS/DASH: FFmpeg에 Referer와 User-Agent를 전달해 MP4 stream copy
+- HLS 비표준 조각: FFmpeg 오류 문구를 확인해 허용 확장자 옵션으로 한 번 재시도
+- HTTP/2 HLS: FFmpeg가 403일 때 curl-cffi로 단순 TS 조각을 받아 FFmpeg remux
+- 변환: ffprobe로 첫 영상·오디오 스트림을 확인하고 필요한 트랙만 변환
+- H.265 MP4는 `hvc1`, 영상 출력은 `yuv420p`, 오디오는 최대 stereo를 기본으로 함
+
+HTTP/2 HLS 호환 경로는 master playlist, 암호화, fMP4 map, byte-range를 지원하지
+않으며 추측해서 처리하지 않습니다.
+
+## 배포와 업데이트
+
+`build_windows.bat`는 Windows Python 환경에서 의존성을 갱신하고 PyInstaller
+`--onefile --windowed` 빌드를 생성합니다. yt-dlp는 EXE 안의 버전을 폴백으로
+유지하면서 별도 폴더의 더 최신 버전만 활성화합니다. 업데이트는 wheel SHA-256,
+경로 안전성, 새 프로세스 import self-test를 통과해야 합니다.
+
+## 보안과 수명 주기
+
+- 로그인, CAPTCHA, DRM을 자동으로 우회하지 않음
+- URL query를 yt-dlp 진단 로그에서 제거
+- playlist와 기존 파일 덮어쓰기 비활성화
+- GUI 취소 시 Windows `taskkill /T`로 worker와 자식 FFmpeg 종료
+- 변환 중단 시 `.converting.*` 임시 파일 정리
+- 브라우저·네트워크·외부 프로세스에는 제한 시간을 적용

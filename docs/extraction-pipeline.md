@@ -1,139 +1,146 @@
 # 스트림 분석 파이프라인
 
-이 문서는 서로 다른 웹사이트와 플레이어 구조를 일관되게 분석하기 위한 구현
-순서와 확장 규칙을 정의한다. 새 사이트를 지원할 때 사이트 이름보다 구조를 먼저
-분류한다.
+새 사이트를 지원할 때 도메인 이름보다 페이지 구조를 먼저 분류하기 위한 현재
+구현 규칙입니다.
 
-## 처리 흐름
+## 실제 우선순위
 
 ```text
-입력 URL
-  ↓
-URL 분류 ── 직접 미디어 URL이면 Stream Candidate 생성
-  ↓ 웹페이지
-정적 HTML 분석
-  ├─ video/source 속성
-  ├─ iframe
-  ├─ JSON-LD 및 페이지 내 JSON
-  └─ 알려진 플레이어 설정
-  ↓
-후보 정규화 및 안전성 검사
-  ↓
-중복 제거
-  ↓
-콘텐츠 그룹화 ── 서로 다른 영상 / 같은 영상의 여러 품질 구분
-  ↓
-형식 분석 ── Direct / HLS / DASH / Unsupported / DRM 표시
-  ↓
-사용자 선택
-  ↓
-형식별 Downloader
+1. YouTube URL인가?
+   └─ 예: YouTube yt-dlp backend
+
+2. 직접 미디어 확장자인가?
+   └─ .mp4 / .webm / .m3u8 / .mpd → StreamInfo
+
+3. 정적 페이지와 iframe 분석
+   ├─ video/source의 src, data-source
+   ├─ link rel=preload as=fetch|video
+   ├─ HTML·script 안의 m3u8/mpd/mp4/webm 문자열
+   └─ iframe/data-src, 깊이 2·전체 8페이지 제한
+
+4. 지원되는 Site Extractor
+   └─ 현재: Mingky movie API → embed page → Generic Extractor
+
+5. yt-dlp Generic backend
+   ├─ curl-cffi impersonation
+   └─ yt-dlp가 지원하는 iframe·플랫폼 extractor
+
+6. Edge/Chrome CDP 네트워크 분석
+   ├─ 숨김 브라우저
+   └─ Cloudflare 확인 감지 시 표시 브라우저
 ```
 
-앞 단계에서 충분한 결과를 얻었으면 뒤의 무거운 분석은 실행하지 않는다. 브라우저
-실행은 가장 마지막 수단으로 둔다.
+각 단계가 사용할 수 있는 결과를 반환하면 뒤 단계는 실행하지 않습니다. 단, 정적
+단계 안에서는 방문한 페이지들의 후보를 모두 모은 뒤 중복 제거와 정렬을 합니다.
 
-## 구조별 처리 정책
+## 구조별 지원 현황
 
-| 페이지 구조 | 분석 방법 | 현재 상태 |
+| 구조 | 처리 방식 | 상태 |
 |---|---|---|
-| 직접 MP4/WebM URL | URL 확장자와 HTTP 응답 검사 | 기본 지원 |
-| `video`/`source` 속성 | 정적 HTML 파서 | 지원 |
-| `data-source` HLS | 정적 HTML 파서 | 지원 |
-| 한 페이지의 여러 `video` | 모든 후보를 수집하고 ID로 선택 | 기본 지원 |
-| 한 영상의 여러 `source` | 후보를 모두 수집 | 기본 지원, 품질 그룹화 예정 |
-| HLS 마스터 목록 | variant 해상도·대역폭 파싱 | 예정 |
-| JSON-LD/페이지 JSON | 허용된 키에서 미디어 URL 탐색 | 예정 |
-| JavaScript 플레이어 설정 | 알려진 설정 객체를 정적으로 파싱 | 예정 |
-| iframe 플레이어 | 깊이·도메인 제한을 둔 재귀 분석 | 예정 |
-| API 호출 후 URL 생성 | 사이트별 Extractor 또는 전문 백엔드 | 예정 |
-| YouTube | yt-dlp 전문 백엔드 | 기본 지원 |
-| Cloudflare 보호/iframe 페이지 | yt-dlp Generic + curl-cffi fallback | 기본 지원 |
-| 로그인 세션 필요 | 명시적 쿠키 입력과 비밀정보 마스킹 | 예정 |
-| Blob URL | 원본 네트워크 요청 분석 | 브라우저 단계에서 검토 |
-| DASH | MPD 분석 후 영상·음성 병합 | 예정 |
-| DRM/권한 보호 | 감지 후 지원 불가 오류 | 우회하지 않음 |
+| 직접 MP4/WebM | URL path 확장자 | 지원 |
+| 직접 HLS/DASH | URL path 확장자 | 지원 |
+| `video`/`source` | 표준 HTML 파서 | 지원 |
+| `data-source` | 표준 HTML 파서 | 지원 |
+| preload 미디어 | `link`의 rel/as 검사 | 지원 |
+| script/JSON 문자열 | 실행 없이 미디어 확장자 URL 정규식 | 지원 |
+| iframe | 제한된 BFS 정적 요청 | 지원 |
+| Mingky movie API | 도메인·path가 일치할 때 Site Extractor | 지원 |
+| YouTube | yt-dlp 전문 backend | 지원 |
+| yt-dlp가 아는 embed | Generic backend가 위임 | 지원 |
+| SPA/blob/동적 API | 브라우저 Network 이벤트 URL·MIME | 지원 |
+| cross-origin iframe | CDP auto-attach한 OOPIF Network 이벤트 | 지원 |
+| Cloudflare 확인 | 사용자가 전용 창에서 완료 | 지원 |
+| HLS master 품질 목록 | 자체 variant 분석 | 미지원 |
+| 로그인 쿠키 입력 | 명시적 cookie API | 미지원 |
+| DRM | 해제 또는 우회 | 범위 밖 |
 
-## 분석 단계의 우선순위
+## Generic Extractor 규칙
 
-1. 직접 URL을 판별한다.
-2. Generic Extractor로 표준 HTML과 구조화 데이터를 분석한다.
-3. iframe처럼 추가 HTTP 요청이 필요한 범용 분석을 수행한다.
-4. 도메인 고유 규칙이 꼭 필요한 경우 Site Extractor를 적용한다.
-5. 변동이 크고 검증된 전문 구현이 있는 플랫폼은 격리된 Backend를 사용한다.
-6. 정적 분석으로 불가능하고 사용자가 명시적으로 허용한 경우에만 브라우저
-   분석을 시도한다.
+HTML은 Python `HTMLParser`로 읽고 JavaScript를 실행하지 않습니다. 상대 주소는
+응답의 최종 URL을 기준으로 절대 주소로 바꿉니다. 다음 조건을 만족하지 않는
+후보는 버립니다.
 
-Generic 분석이 Site Extractor보다 우선한다. 사이트가 HTML 구조를 바꾸더라도
-표준 방식으로 돌아오면 별도 규칙 없이 처리할 수 있기 때문이다.
+- scheme이 `http` 또는 `https`
+- hostname 존재
+- URL 사용자 정보 없음
+- path가 `.m3u8`, `.mpd`, `.mp4`, `.webm` 중 하나로 끝남
 
-## 후보 정규화
+스크립트 문자열 분석도 확장자가 명시된 URL만 수집합니다. MIME만으로 알 수 있는
+확장자 없는 미디어 요청은 브라우저 단계가 담당합니다.
 
-Extractor가 발견한 값은 즉시 다운로드하지 않고 공통 후보로 변환한다. 최종
-모델은 다음 정보를 표현할 수 있어야 한다.
+## Site Extractor 기준
 
-- 미디어 URL과 스트림 형식
-- 페이지 URL과 필요한 Referer
-- 제목과 콘텐츠 그룹 식별자
-- 해상도, 대역폭, 코덱 등 품질 정보
-- 영상 전용, 음성 전용, 결합 스트림 여부
-- 후보를 발견한 Extractor와 근거
-- 인증 필요 여부와 DRM 감지 상태
+Site Extractor는 표준 HTML로 표현되지 않는 안정된 공개 API나 도메인 규칙이 있을
+때만 추가합니다. 현재 `MingkyExtractor`는 다음 순서로 동작합니다.
 
-현재 `StreamInfo`에는 URL, 제목, 형식, Referer만 있다. 품질 분석을 구현할 때
-실제 요구가 확인된 필드부터 추가한다.
+1. `mingky숫자.com/movie/{id}` 형식 확인
+2. 같은 origin의 `/api/movies/{id}` JSON 요청
+3. `embed_url` 플레이어 HTML 요청
+4. Generic Extractor로 미디어 후보 추출
+5. API 제목을 각 `StreamInfo`에 적용
 
-## 여러 영상과 여러 품질
+사이트별 코드가 Downloader나 CLI의 형식 분기를 직접 추가해서는 안 됩니다. Site
+Extractor가 더 늘어나 단순한 명시 분기가 불편해질 때 Protocol과 Registry를
+도입합니다.
 
-다음 두 경우를 구분해야 한다.
+## yt-dlp backend 경계
 
-```text
-페이지
- ├─ 영상 A
- │   ├─ 1080p
- │   └─ 720p
- └─ 영상 B
-     ├─ 1080p
-     └─ 480p
-```
+YouTube는 처음부터 전용 backend로 분기합니다. 일반 URL은 정적 파이프라인이
+`NetworkError` 또는 `StreamNotFoundError`로 끝났을 때만 yt-dlp Generic backend로
+넘깁니다. 이 backend는 yt-dlp native format ID를 유지하며 분석과 전송을 함께
+담당합니다.
 
-- 서로 다른 `<video>` 또는 명확히 다른 플레이어 컨테이너는 별도 콘텐츠 그룹의
-  단서로 사용한다.
-- 같은 HLS 마스터 또는 같은 플레이어의 variant는 같은 콘텐츠의 품질로 묶는다.
-- 근거가 부족하면 임의로 합치지 않고 각각의 후보로 표시한다.
-- 기본 다운로드는 한 후보만 선택하며, 전체 일괄 다운로드는 별도 명시 옵션으로
-  추가한다. 사용자가 모르는 사이 여러 파일을 저장하지 않는다.
+yt-dlp에서도 실패하면 마지막으로 브라우저 분석을 시작합니다. 따라서 yt-dlp가
+정상 형식을 반환한 페이지에서 불필요하게 실제 브라우저가 열리지 않습니다.
 
-## 중복 제거
+## 브라우저 후보 판별
 
-- 상대 URL을 절대 URL로 바꾼 다음 비교한다.
-- URL fragment는 미디어 요청 식별에 의미가 없으면 제거한다.
-- 서명·토큰 query는 함부로 제거하지 않는다.
-- 같은 URL이 여러 태그에서 발견되면 하나로 합치되 더 풍부한 메타데이터를
-  보존한다.
-- URL이 다르다는 이유만으로 다른 영상이라고 단정하지 않는다. CDN 주소가 다른
-  동일 품질일 수도 있기 때문이다.
+CDP의 `Network.requestWillBeSent`와 `Network.responseReceived`에서 다음 정보를
+사용합니다.
 
-## Extractor 확장 기준
+- URL path 확장자
+- HLS MIME (`mpegurl`)
+- DASH MIME (`dash+xml`)
+- `video/*` MIME
+- Media resource의 octet-stream 응답
 
-새 구조가 발견되면 다음 순서를 따른다.
+후보 점수는 HLS 300, DASH 250, direct 100을 기준으로 하며 URL path에 master,
+index, playlist, manifest가 있으면 가점을 줍니다. 요청의 Referer와 브라우저
+User-Agent도 `StreamInfo`에 보존합니다.
 
-1. 익명화한 최소 HTML 또는 재생목록 fixture를 만든다.
-2. 기존 Generic Extractor로 처리되는지 확인한다.
-3. 여러 사이트에서 재사용할 수 있으면 Generic 분석 단계를 확장한다.
-4. 특정 도메인에서만 의미가 있으면 Site Extractor로 분리한다.
-5. 공통 `StreamInfo` 계약을 통해 Downloader와 연결한다.
-6. 성공, 후보 없음, 잘못된 데이터, 중복, 여러 영상 사례를 테스트한다.
-7. 구현 결과와 제한을 `docs/development.md`에 기록한다.
+Cloudflare의 `403`과 `cf-mitigated: challenge` 또는 challenge 제목이 확인되고
+후보가 없으면 숨김 브라우저를 종료한 뒤 같은 전용 프로필로 표시 브라우저를
+엽니다. 사용자가 확인을 완료하면 같은 네트워크 관찰을 계속합니다.
 
-두 번째 독립 Extractor가 필요해지는 시점에 Extractor Protocol과 Registry를 코드로
-도입한다. 하나뿐인 현재 단계에서는 사용되지 않는 추상화를 미리 만들지 않는다.
+## 후보 정규화와 선택
+
+현재 정규화는 의도적으로 단순합니다.
+
+- 완전한 URL 문자열이 같은 후보만 중복으로 간주
+- signed query는 제거하지 않음
+- 제목, 형식, Referer, User-Agent만 보존
+- HLS → DASH → direct 순서로 정렬
+- 일반 CLI의 기본 선택은 첫 후보, `-f N`은 1부터 시작하는 번호
+
+서로 다른 영상과 동일 영상의 품질 variant를 판단할 근거는 아직 모델에 없습니다.
+URL이 다르다는 이유만으로 콘텐츠를 합치거나 나누지 않습니다.
+
+## 확장 절차
+
+1. 실패한 구조를 민감정보 없이 최소 fixture로 만든다.
+2. 기존 Generic Extractor로 표현 가능한지 확인한다.
+3. 여러 사이트에 재사용되면 Generic 규칙을 확장한다.
+4. 특정 공개 API에만 의미가 있으면 Site Extractor로 분리한다.
+5. 유지보수되는 전문 extractor가 있으면 backend 위임을 우선한다.
+6. 실제 JavaScript와 네트워크가 필수일 때만 브라우저 단계를 확장한다.
+7. 성공, 후보 없음, 중복, 네트워크 오류, 수명 주기 회귀 테스트를 추가한다.
+8. 사용자 영향은 CHANGELOG, 설계 이유는 ADR에 기록한다.
 
 ## 실패와 안전성
 
-- 후보를 찾지 못한 것과 네트워크 실패를 다른 오류로 표시한다.
-- 지원하지 않는 형식과 DRM 감지를 구분한다.
-- Cookie, Authorization, 서명 query를 로그에 출력하지 않는다.
-- 페이지 스크립트 문자열을 코드로 실행하지 않는다.
-- iframe 재귀 분석에는 깊이, 응답 크기, 요청 수 제한을 둔다.
-- DRM 해제, 인증 우회, 접근 권한 우회는 구현하지 않는다.
+- 후보 없음과 네트워크 실패는 별도 예외로 유지합니다.
+- iframe 요청 수와 응답 크기를 제한합니다.
+- HTML의 JavaScript를 Python에서 평가하지 않습니다.
+- Cookie, Authorization, signed query를 로그에 노출하지 않습니다.
+- 사용자 확인 창은 보안 검증을 자동으로 풀지 않습니다.
+- 인증 우회, CAPTCHA 자동화, DRM 해제는 구현하지 않습니다.

@@ -95,7 +95,7 @@ def download_youtube(
     )
 
     title = info.get("title") or info.get("id") or "YouTube video"
-    print(f"저장 시작: {title}")
+    print(f"저장 시작: {title}", flush=True)
     try:
         with yt_dlp.YoutubeDL(options) as downloader:
             result = downloader.download([url])

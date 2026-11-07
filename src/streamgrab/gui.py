@@ -675,6 +675,10 @@ class StreamGrabApp(tk.Tk):
         elif "후처리" in line or "병합" in line:
             self._set_bar(self.download_bar, None)
             self.download_text.set("영상과 음성을 합치고 있습니다…")
+        elif "Cloudflare 확인" in line:
+            self._set_bar(self.download_bar, None)
+            self.download_text.set("브라우저에서 Cloudflare 확인을 완료해 주세요…")
+            self.status.set("브라우저 확인 대기 중")
         elif line.startswith("저장 시작:"):
             self.download_text.set(_shorten(line.strip(), 70))
 

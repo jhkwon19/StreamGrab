@@ -52,3 +52,26 @@ def test_ignores_non_http_media_url() -> None:
     )
 
     assert streams == []
+
+
+def test_extracts_preloaded_hls_fetch() -> None:
+    html = """
+    <title>Embedded player</title>
+    <link rel="preload" as="fetch" href="/playlist/index.m3u8" crossorigin>
+    """
+
+    streams = GenericExtractor().extract("https://player.example/embed/1", html)
+
+    assert len(streams) == 1
+    assert streams[0].url == "https://player.example/playlist/index.m3u8"
+    assert streams[0].referer == "https://player.example/embed/1"
+
+
+def test_extracts_media_url_from_inline_player_script() -> None:
+    html = r'''<script>player.mount("https:\/\/media.example\/index.m3u8")</script>'''
+
+    streams = GenericExtractor().extract("https://example.com/watch/1", html)
+
+    assert [stream.url for stream in streams] == [
+        "https://media.example/index.m3u8"
+    ]

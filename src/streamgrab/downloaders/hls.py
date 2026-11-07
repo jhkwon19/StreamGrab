@@ -27,7 +27,7 @@ def download_hls(stream: StreamInfo, destination: Path) -> None:
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     command = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning"]
-    command.extend(["-user_agent", USER_AGENT])
+    command.extend(["-user_agent", stream.user_agent or USER_AGENT])
     if stream.referer:
         command.extend(["-referer", stream.referer])
     command.extend(["-i", stream.url, "-map", "0", "-c", "copy", "-n", str(destination)])
@@ -39,6 +39,24 @@ def download_hls(stream: StreamInfo, destination: Path) -> None:
 
     if result.returncode == 0:
         return
+
+    compatibility_options = _extension_compatibility_options(result.stderr)
+    if compatibility_options:
+        if destination.exists():
+            destination.unlink()
+        logger.info("HLS 조각의 비표준 확장자를 허용하고 다시 시도합니다")
+        input_index = command.index("-i")
+        retry_command = [
+            *command[:input_index],
+            *compatibility_options,
+            *command[input_index:],
+        ]
+        try:
+            result = subprocess.run(retry_command, capture_output=True, text=True)
+        except OSError as error:
+            raise FFmpegError(f"FFmpeg를 실행할 수 없습니다: {error}") from error
+        if result.returncode == 0:
+            return
 
     # Some CDNs accept the same headers over HTTP/2 but reject FFmpeg's
     # HTTP/1.1 client. In that specific case curl transports the plain TS
@@ -54,6 +72,23 @@ def download_hls(stream: StreamInfo, destination: Path) -> None:
     raise FFmpegError(
         f"FFmpeg가 오류 코드 {result.returncode}로 종료되었습니다{detail}"
     )
+
+
+def _extension_compatibility_options(stderr: str) -> list[str]:
+    """Return HLS options for FFmpeg versions that reject disguised segments."""
+
+    if "allowed_segment_extensions" in stderr:
+        return [
+            "-allowed_extensions",
+            "ALL",
+            "-allowed_segment_extensions",
+            "ALL",
+            "-extension_picky",
+            "0",
+        ]
+    if "allowed_extensions" in stderr:
+        return ["-allowed_extensions", "ALL"]
+    return []
 
 
 def _find_ffmpeg() -> str | None:
@@ -80,7 +115,7 @@ def _find_ffmpeg() -> str | None:
 def _download_simple_hls_over_http2(
     stream: StreamInfo, destination: Path, ffmpeg: str
 ) -> None:
-    headers = {"User-Agent": USER_AGENT}
+    headers = {"User-Agent": stream.user_agent or USER_AGENT}
     if stream.referer:
         headers["Referer"] = stream.referer
     try:

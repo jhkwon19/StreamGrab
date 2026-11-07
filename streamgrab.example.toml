@@ -1,9 +1,4 @@
 output_directory = "downloads"
-default_quality = "best"
-
-[retry]
-count = 3
 
 [network]
 timeout = 30
-
