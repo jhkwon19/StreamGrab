@@ -11,6 +11,7 @@ from yt_dlp.utils import DownloadError as YtDlpDownloadError
 
 from streamgrab.exceptions import DownloadError, StreamNotFoundError
 from streamgrab.transcode import (
+    DEFAULT_AUDIO_CODEC,
     DEFAULT_VIDEO_CODEC,
     ensure_video_codec,
     format_selector as codec_format_selector,
@@ -68,6 +69,7 @@ def download_youtube(
     output: Path,
     format_selector: str | None = None,
     video_codec: str = DEFAULT_VIDEO_CODEC,
+    audio_codec: str = DEFAULT_AUDIO_CODEC,
 ) -> Path | None:
     selector = format_selector or codec_format_selector(video_codec, DEFAULT_FORMAT)
     info = _extract_info(url, selector)
@@ -109,7 +111,7 @@ def download_youtube(
     progress.complete()
     final = Path(saved_files[-1]) if saved_files else None
     if final is not None:
-        final = ensure_video_codec(final, video_codec)
+        final = ensure_video_codec(final, video_codec, audio_codec=audio_codec)
     print(f"저장 완료: {final or (output if output.suffix else output.resolve())}")
     return final
 

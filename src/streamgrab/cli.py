@@ -30,6 +30,8 @@ from streamgrab.extractors import GenericExtractor
 from streamgrab.extractors.generic import detect_stream_type
 from streamgrab.filenames import output_path
 from streamgrab.transcode import (
+    AUDIO_CODECS,
+    DEFAULT_AUDIO_CODEC,
     DEFAULT_VIDEO_CODEC,
     VIDEO_CODECS,
     convert_file,
@@ -79,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="저장할 영상 코덱 (기본값: h264, TV 호환). original은 변환하지 않음",
     )
     parser.add_argument(
+        "--audio",
+        choices=AUDIO_CODECS,
+        default=DEFAULT_AUDIO_CODEC,
+        help="저장할 오디오 코덱 (기본값: aac). AAC를 못 읽는 주방 TV 등은 mp3 또는 ac3",
+    )
+    parser.add_argument(
         "--convert",
         nargs="+",
         type=Path,
@@ -108,7 +116,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logger.debug("설정 로드 완료: %s", config)
 
     if args.convert:
-        return _convert_files(parser, args.convert, args.codec, args.output)
+        return _convert_files(parser, args.convert, args.codec, args.output, args.audio)
 
     if not args.url:
         parser.print_help()
@@ -124,6 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.output or config.output_directory,
                     args.format,
                     args.codec,
+                    args.audio,
                 )
             return 0
 
@@ -138,6 +147,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.output or config.output_directory,
                     args.format,
                     args.codec,
+                    args.audio,
                 )
             return 0
         if args.list_formats:
@@ -155,7 +165,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(f"저장 시작: {destination}")
         download_stream(selected, destination, config.network_timeout)
-        destination = ensure_video_codec(destination, args.codec)
+        destination = ensure_video_codec(destination, args.codec, audio_codec=args.audio)
         print(f"저장 완료: {destination}")
         return 0
     except (StreamGrabError, OSError) as error:
@@ -168,6 +178,7 @@ def _convert_files(
     files: Sequence[Path],
     video_codec: str,
     folder: Path | None,
+    audio_codec: str = "aac",
 ) -> int:
     if video_codec == "original":
         parser.error("--convert에는 --codec h264 또는 --codec h265를 지정하세요")
@@ -176,7 +187,7 @@ def _convert_files(
     for index, source in enumerate(files, start=1):
         print(f"[{index}/{len(files)}] {source}")
         try:
-            convert_file(source, video_codec, folder)
+            convert_file(source, video_codec, folder, audio_codec)
         except (StreamGrabError, OSError) as error:
             failures += 1
             logger.error("%s", error)

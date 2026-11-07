@@ -49,6 +49,11 @@ CODEC_CHOICES = {
     "H.265 / HEVC (용량 절약)": "h265",
     "원본 유지 (VP9·AV1일 수 있음)": "original",
 }
+AUDIO_CHOICES = {
+    "AAC (일반 TV·휴대폰)": "aac",
+    "MP3 (주방 TV 등 AAC 미지원 기기)": "mp3",
+    "AC-3 / 돌비 (방송용 TV)": "ac3",
+}
 CONVERT_CODEC_CHOICES = {
     label: codec for label, codec in CODEC_CHOICES.items() if codec != "original"
 }
@@ -64,6 +69,31 @@ def _worker_prefix() -> list[str]:
     if getattr(sys, "frozen", False):
         return [sys.executable, "--cli"]
     return [sys.executable, "-m", "streamgrab"]
+
+
+def settings_path() -> Path:
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / ".local" / "share")
+    return Path(base) / "StreamGrab" / "settings.json"
+
+
+def load_settings() -> dict:
+    """Last choices in the GUI (codec, audio, folders). Missing/broken -> {}."""
+    try:
+        data = json.loads(settings_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_settings(values: dict) -> None:
+    path = settings_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        pass
 
 
 def auto_update_enabled() -> bool:
@@ -89,12 +119,22 @@ def parse_ytdlp_status(output: str) -> dict | None:
     return None
 
 
-def cli_command(url: str, destination: Path, video_codec: str = "h264") -> list[str]:
-    return [*_worker_prefix(), url, "--codec", video_codec, "--output", str(destination)]
+def cli_command(
+    url: str, destination: Path, video_codec: str = "h264", audio_codec: str = "aac"
+) -> list[str]:
+    return [
+        *_worker_prefix(), url, "--codec", video_codec, "--audio", audio_codec,
+        "--output", str(destination),
+    ]
 
 
-def convert_command(source: Path, video_codec: str, folder: Path | None = None) -> list[str]:
-    command = [*_worker_prefix(), "--convert", str(source), "--codec", video_codec]
+def convert_command(
+    source: Path, video_codec: str, folder: Path | None = None, audio_codec: str = "aac"
+) -> list[str]:
+    command = [
+        *_worker_prefix(), "--convert", str(source), "--codec", video_codec,
+        "--audio", audio_codec,
+    ]
     if folder is not None:
         command += ["--output", str(folder)]
     return command
@@ -123,7 +163,11 @@ def terminate_tree(process: subprocess.Popen) -> None:
 
 
 def remove_partial_conversions(folder: Path) -> None:
-    leftovers = [*folder.glob("*.converting.mp4"), *folder.glob("*.converting.aac")]
+    leftovers = [
+        leftover
+        for pattern in ("*.converting.mp4", "*.converting.aac", "*.converting.mp3", "*.converting.ac3")
+        for leftover in folder.glob(pattern)
+    ]
     for leftover in leftovers:
         try:
             leftover.unlink()

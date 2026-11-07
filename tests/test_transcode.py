@@ -32,11 +32,13 @@ def test_converted_path_never_overwrites(tmp_path: Path) -> None:
 
 
 def test_gui_commands_pass_codec() -> None:
-    assert cli_command("https://e.com/v", Path("d"), "h265")[-4:] == [
-        "--codec", "h265", "--output", "d",
+    assert cli_command("https://e.com/v", Path("d"), "h265", "mp3")[-6:] == [
+        "--codec", "h265", "--audio", "mp3", "--output", "d",
     ]
-    command = convert_command(Path("a.mp4"), "h264", Path("out"))
-    assert command[-6:] == ["--convert", "a.mp4", "--codec", "h264", "--output", "out"]
+    command = convert_command(Path("a.mp4"), "h264", Path("out"), "ac3")
+    assert command[-8:] == [
+        "--convert", "a.mp4", "--codec", "h264", "--audio", "ac3", "--output", "out",
+    ]
 
 
 def test_parse_progress_distinguishes_download_and_conversion() -> None:
@@ -53,12 +55,16 @@ def test_cli_convert_rejects_original(capsys) -> None:
 def test_cli_convert_routes_each_file(monkeypatch, tmp_path: Path) -> None:
     calls = []
     monkeypatch.setattr(
-        cli, "convert_file", lambda source, codec, folder: calls.append((source, codec, folder))
+        cli,
+        "convert_file",
+        lambda source, codec, folder, audio: calls.append((source, codec, folder, audio)),
     )
-    assert cli.main(["--convert", "a.mp4", "b.mkv", "--codec", "h265", "-o", str(tmp_path)]) == 0
+    assert cli.main([
+        "--convert", "a.mp4", "b.mkv", "--codec", "h265", "--audio", "mp3", "-o", str(tmp_path),
+    ]) == 0
     assert calls == [
-        (Path("a.mp4"), "h265", tmp_path),
-        (Path("b.mkv"), "h265", tmp_path),
+        (Path("a.mp4"), "h265", tmp_path, "mp3"),
+        (Path("b.mkv"), "h265", tmp_path, "mp3"),
     ]
 
 
@@ -158,3 +164,53 @@ def test_converted_files_have_tv_safe_audio(tmp_path: Path) -> None:
     clip = _make_vp9_clip(tmp_path)
     result = convert_file(clip, "h265")
     assert _audio_config_size(result) == 2
+
+
+def _audio_codec(path: Path) -> str:
+    from streamgrab.transcode import _find_ffprobe, _probe
+
+    probe = _probe(_find_ffprobe(find_ffmpeg()), path)
+    return next(s for s in probe["streams"] if s["codec_type"] == "audio")["codec_name"]
+
+
+@pytest.mark.parametrize(("audio", "expected", "suffix"), [
+    ("mp3", "mp3", "(H.264 MP3).mp4"),
+    ("ac3", "ac3", "(H.264 AC-3).mp4"),
+])
+def test_convert_file_to_kitchen_tv_audio(tmp_path: Path, audio, expected, suffix) -> None:
+    """Some kitchen TVs (e.g. COSTEL CVK-118AF) decode MP3/AC-3 but not AAC."""
+    clip = _make_vp9_clip(tmp_path)
+
+    result = convert_file(clip, "h264", audio_codec=audio)
+
+    assert result.name.endswith(suffix)
+    assert probe_video_codec(result) == "H.264"
+    assert _audio_codec(result) == expected
+    assert not list(tmp_path.glob("*.converting.*"))
+
+
+def test_download_fix_switches_audio_without_touching_h264_video(tmp_path: Path) -> None:
+    ffmpeg = find_ffmpeg()
+    if ffmpeg is None:
+        pytest.skip("FFmpeg not installed")
+    clip = tmp_path / "already h264.mp4"
+    subprocess.run(
+        [
+            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=1",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+            "-c:v", "libx264", "-c:a", "aac", "-shortest", str(clip),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    result = ensure_video_codec(clip, "h264", audio_codec="mp3")
+
+    assert result == clip and _audio_codec(result) == "mp3"
+    assert ensure_video_codec(result, "h264", audio_codec="mp3") == clip  # already fine
+
+
+def test_converted_path_strips_previous_audio_label(tmp_path: Path) -> None:
+    source = tmp_path / "clip (H.265 MP3).mp4"
+    assert converted_path(source, "h264", audio_codec="mp3") == tmp_path / "clip (H.264 MP3).mp4"

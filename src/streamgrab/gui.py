@@ -14,7 +14,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from streamgrab import __version__
+from streamgrab.transcode import output_label
 from streamgrab.gui_support import (
+    AUDIO_CHOICES,
     CODEC_CHOICES,
     CONVERT_CODEC_CHOICES,
     VIDEO_FILE_TYPES,
@@ -27,6 +29,8 @@ from streamgrab.gui_support import (
     terminate_tree,
     worker_environment,
     auto_update_enabled,
+    load_settings,
+    save_settings,
     parse_ytdlp_status,
     ytdlp_command,
 )
@@ -67,21 +71,36 @@ class StreamGrabApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("StreamGrab")
-        self.geometry("740x650")
+        self.geometry("760x660")
         self.minsize(640, 600)
 
         # Download tab state
         self.url = tk.StringVar()
-        self.destination = tk.StringVar(value=str(Path.home() / "Downloads"))
-        self.download_codec = tk.StringVar(value=next(iter(CODEC_CHOICES)))
+        settings = load_settings()
+        self.destination = tk.StringVar(
+            value=str(settings.get("destination") or Path.home() / "Downloads")
+        )
+        self.download_codec = tk.StringVar(
+            value=_label_for(CODEC_CHOICES, settings.get("download_codec"))
+        )
+        self.download_audio = tk.StringVar(
+            value=_label_for(AUDIO_CHOICES, settings.get("download_audio"))
+        )
         self.download_text = tk.StringVar(value="주소를 입력하고 다운로드를 시작하세요")
         self.download_percent = tk.StringVar(value="")
 
         # Convert tab state
-        self.convert_codec = tk.StringVar(value=next(iter(CONVERT_CODEC_CHOICES)))
+        self.convert_codec = tk.StringVar(
+            value=_label_for(CONVERT_CODEC_CHOICES, settings.get("convert_codec"))
+        )
+        self.convert_audio = tk.StringVar(
+            value=_label_for(AUDIO_CHOICES, settings.get("convert_audio"))
+        )
         self.convert_target = tk.StringVar(value="same")
         self.convert_hint = tk.StringVar()
-        self.convert_folder = tk.StringVar(value=str(Path.home() / "Videos"))
+        self.convert_folder = tk.StringVar(
+            value=str(settings.get("convert_folder") or Path.home() / "Videos")
+        )
         self.convert_text = tk.StringVar(value="변환할 영상 파일을 추가하세요")
         self.convert_percent = tk.StringVar(value="")
         self._items: dict[str, _ConvertItem] = {}
@@ -343,17 +362,13 @@ class StreamGrabApp(tk.Tk):
             row=1, column=2, padx=(8, 0), pady=(12, 0)
         )
 
-        ttk.Label(form, text="영상 코덱").grid(row=2, column=0, sticky="w", pady=(12, 0))
-        ttk.Combobox(
-            form,
-            textvariable=self.download_codec,
-            values=list(CODEC_CHOICES),
-            state="readonly",
-            width=32,
-        ).grid(row=2, column=1, sticky="w", pady=(12, 0))
+        ttk.Label(form, text="코덱").grid(row=2, column=0, sticky="w", pady=(12, 0))
+        self._codec_row(form, self.download_codec, CODEC_CHOICES, self.download_audio).grid(
+            row=2, column=1, columnspan=2, sticky="w", pady=(12, 0)
+        )
         ttk.Label(
             form,
-            text="TV에서 재생되지 않으면 H.264를 선택하세요. 필요하면 받은 뒤 자동 변환합니다.",
+            text="TV에서 화면이 안 나오면 H.264, 소리가 안 나오면 MP3를 고르세요. 받은 뒤 자동 변환합니다.",
             style="Hint.TLabel",
         ).grid(row=3, column=1, columnspan=2, sticky="w", pady=(6, 0))
 
@@ -413,13 +428,9 @@ class StreamGrabApp(tk.Tk):
         options.pack(fill="x", pady=(14, 0))
         options.columnconfigure(2, weight=1)
         ttk.Label(options, text="변환 코덱").grid(row=0, column=0, sticky="w", padx=(0, 14))
-        ttk.Combobox(
-            options,
-            textvariable=self.convert_codec,
-            values=list(CONVERT_CODEC_CHOICES),
-            state="readonly",
-            width=32,
-        ).grid(row=0, column=1, columnspan=2, sticky="w")
+        self._codec_row(options, self.convert_codec, CONVERT_CODEC_CHOICES, self.convert_audio).grid(
+            row=0, column=1, columnspan=3, sticky="w"
+        )
 
         ttk.Label(options, text="저장 위치").grid(row=1, column=0, sticky="w", pady=(12, 0))
         ttk.Radiobutton(
@@ -439,7 +450,8 @@ class StreamGrabApp(tk.Tk):
         ttk.Label(options, textvariable=self.convert_hint, style="Hint.TLabel").grid(
             row=3, column=1, columnspan=3, sticky="w", pady=(8, 0)
         )
-        self.convert_codec.trace_add("write", lambda *_args: self._sync_convert_hint())
+        for variable in (self.convert_codec, self.convert_audio):
+            variable.trace_add("write", lambda *_args: self._sync_convert_hint())
         self._sync_convert_hint()
         self._sync_target_state()
 
@@ -495,9 +507,38 @@ class StreamGrabApp(tk.Tk):
             self.convert_target.set("folder")
             self._sync_target_state()
 
+    def _codec_row(
+        self,
+        parent: tk.Misc,
+        video: tk.StringVar,
+        video_choices: dict[str, str],
+        audio: tk.StringVar,
+    ) -> ttk.Frame:
+        row = ttk.Frame(parent)
+        ttk.Combobox(
+            row, textvariable=video, values=list(video_choices), state="readonly", width=27,
+        ).pack(side="left")
+        ttk.Label(row, text="오디오").pack(side="left", padx=(14, 8))
+        ttk.Combobox(
+            row, textvariable=audio, values=list(AUDIO_CHOICES), state="readonly", width=30,
+        ).pack(side="left")
+        return row
+
     def _sync_convert_hint(self) -> None:
-        label = "H.265" if CONVERT_CODEC_CHOICES[self.convert_codec.get()] == "h265" else "H.264"
+        label = output_label(
+            CONVERT_CODEC_CHOICES[self.convert_codec.get()], AUDIO_CHOICES[self.convert_audio.get()]
+        )
         self.convert_hint.set(f"원본 파일은 그대로 두고 '파일명 ({label}).mp4' 형식의 새 파일을 만듭니다.")
+
+    def _save_settings(self) -> None:
+        save_settings({
+            "destination": self.destination.get().strip(),
+            "download_codec": CODEC_CHOICES[self.download_codec.get()],
+            "download_audio": AUDIO_CHOICES[self.download_audio.get()],
+            "convert_codec": CONVERT_CODEC_CHOICES[self.convert_codec.get()],
+            "convert_audio": AUDIO_CHOICES[self.convert_audio.get()],
+            "convert_folder": self.convert_folder.get().strip(),
+        })
 
     def _sync_target_state(self) -> None:
         state = "normal" if self.convert_target.get() == "folder" else "disabled"
@@ -609,13 +650,15 @@ class StreamGrabApp(tk.Tk):
             return
 
         codec = CODEC_CHOICES[self.download_codec.get()]
+        audio = AUDIO_CHOICES[self.download_audio.get()]
+        self._save_settings()
         self._job = "download"
         self._set_busy(True)
         self._set_bar(self.download_bar, None)
         self.download_text.set("영상 정보를 확인하고 있습니다…")
         self.download_percent.set("")
         self.status.set("다운로드 준비 중")
-        self._launch(cli_command(url, destination, codec))
+        self._launch(cli_command(url, destination, codec, audio))
 
     def _download_line(self, line: str) -> None:
         progress = parse_progress(line)
@@ -678,6 +721,7 @@ class StreamGrabApp(tk.Tk):
                 return
         for iid in pending:
             self._set_item_status(iid, "대기")
+        self._save_settings()
         self._convert_queue = pending
         self._convert_results = {"ok": 0, "failed": 0}
         self._job = "convert"
@@ -708,7 +752,8 @@ class StreamGrabApp(tk.Tk):
         self.convert_text.set(f"{done + 1}/{total} · {_shorten(item.path.name, 50)}")
         self.status.set("코덱 변환 중")
         codec = CONVERT_CODEC_CHOICES[self.convert_codec.get()]
-        self._launch(convert_command(item.path, codec, self._convert_target_folder()))
+        audio = AUDIO_CHOICES[self.convert_audio.get()]
+        self._launch(convert_command(item.path, codec, self._convert_target_folder(), audio))
 
     def _convert_line(self, line: str) -> None:
         progress = parse_progress(line)
@@ -1044,6 +1089,14 @@ class _ThinBar(tk.Canvas):
             self.coords(self._fill, max(0, start), 0, min(width, start + 0.3 * width), self._HEIGHT)
         else:
             self.coords(self._fill, 0, 0, width * self._value / 100, self._HEIGHT)
+
+
+def _label_for(choices: dict[str, str], value: object) -> str:
+    """Combobox label for a saved codec key, falling back to the first choice."""
+    for label, key in choices.items():
+        if key == value:
+            return label
+    return next(iter(choices))
 
 
 def _human_size(size: int) -> str:
