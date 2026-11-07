@@ -173,3 +173,26 @@ def test_real_selftest_accepts_installed_ytdlp(tmp_path: Path) -> None:
     assert not rt.run_selftest(tmp_path, "2026.10.26")  # empty folder -> pip copy -> rejected
     installed = Path(yt_dlp.__file__).parent
     assert rt.run_selftest(installed.parent, yt_dlp.version.__version__)
+
+
+def test_update_check_output_reaches_gui_as_utf8(tmp_path: Path, monkeypatch) -> None:
+    """Regression: the status bar showed mojibake after "업데이트 확인"."""
+    import os
+    import subprocess
+
+    from streamgrab.gui_support import parse_ytdlp_status, worker_environment, ytdlp_command
+
+    rt._save_state(tmp_path, "2026.10.26")  # recent check -> no network needed
+    env = worker_environment()
+    env.pop("PYTHONIOENCODING")
+    env["STREAMGRAB_YTDLP_HOME"] = str(tmp_path)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+
+    result = subprocess.run(
+        ytdlp_command(force=False, update=True),
+        capture_output=True, encoding="utf-8", errors="strict", env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "최근에 확인했습니다" in result.stdout
+    assert parse_ytdlp_status(result.stdout)["message"] == "최근에 확인했습니다"

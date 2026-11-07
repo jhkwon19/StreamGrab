@@ -171,7 +171,8 @@ class UpdateResult:
     message: str = ""
 
     def as_json(self) -> str:
-        return json.dumps(self.__dict__, ensure_ascii=False)
+        # ASCII-only so the status line survives any console/pipe encoding.
+        return json.dumps(self.__dict__, ensure_ascii=True)
 
 
 def check_and_update(
@@ -452,6 +453,11 @@ def handle_runtime_args(argv: list[str]) -> int | None:
     Returns an exit code when a flag was handled, otherwise activates the
     external yt-dlp for the upcoming CLI run and returns None.
     """
+    from streamgrab.gui_support import configure_output_streams
+
+    # These commands print Korean messages before cli.main() would set up the
+    # streams, so match the GUI's UTF-8 decoding here as well.
+    configure_output_streams()
     if argv[:1] == ["--ytdlp-selftest"] and len(argv) == 3:
         return _selftest_main(argv[1], argv[2])
     if argv[:1] == ["--ytdlp-status"]:
