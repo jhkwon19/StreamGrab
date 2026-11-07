@@ -10,6 +10,11 @@ import yt_dlp
 from yt_dlp.utils import DownloadError as YtDlpDownloadError
 
 from streamgrab.exceptions import DownloadError, StreamNotFoundError
+from streamgrab.transcode import (
+    DEFAULT_VIDEO_CODEC,
+    ensure_video_codec,
+    format_selector as codec_format_selector,
+)
 from streamgrab.backends.ytdlp_common import (
     YtDlpProgress as _YouTubeProgress,
     base_options as _base_options,
@@ -59,15 +64,19 @@ def list_youtube_formats(url: str) -> None:
 
 
 def download_youtube(
-    url: str, output: Path, format_selector: str | None = None
-) -> None:
-    selector = format_selector or DEFAULT_FORMAT
+    url: str,
+    output: Path,
+    format_selector: str | None = None,
+    video_codec: str = DEFAULT_VIDEO_CODEC,
+) -> Path | None:
+    selector = format_selector or codec_format_selector(video_codec, DEFAULT_FORMAT)
     info = _extract_info(url, selector)
     progress = _YouTubeProgress.from_info(info)
     output_template = _output_template(output)
     output_template.parent.mkdir(parents=True, exist_ok=True)
 
     options = _base_options()
+    saved_files: list[str] = []
     options.update(
         {
             "format": selector,
@@ -79,6 +88,7 @@ def download_youtube(
             "noprogress": True,
             "progress_hooks": [progress.download_hook],
             "postprocessor_hooks": [progress.postprocessor_hook],
+            "post_hooks": [saved_files.append],
         }
     )
 
@@ -97,7 +107,11 @@ def download_youtube(
         progress.finish_line()
         raise DownloadError(f"YouTube 다운로드가 오류 코드 {result}로 종료되었습니다")
     progress.complete()
-    print(f"저장 완료: {output if output.suffix else output.resolve()}")
+    final = Path(saved_files[-1]) if saved_files else None
+    if final is not None:
+        final = ensure_video_codec(final, video_codec)
+    print(f"저장 완료: {final or (output if output.suffix else output.resolve())}")
+    return final
 
 
 def _extract_info(url: str, format_selector: str | None) -> dict[str, Any]:

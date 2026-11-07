@@ -45,9 +45,12 @@ def test_cli_routes_youtube_to_specialized_backend(
     called: dict[str, object] = {}
     monkeypatch.setattr(cli, "is_youtube_url", lambda url: True)
 
-    def fake_download(url, output, format_selector):
+    def fake_download(url, output, format_selector, video_codec):
         called.update(
-            url=url, output=output, format_selector=format_selector
+            url=url,
+            output=output,
+            format_selector=format_selector,
+            video_codec=video_codec,
         )
 
     monkeypatch.setattr(cli, "download_youtube", fake_download)
@@ -68,6 +71,7 @@ def test_cli_routes_youtube_to_specialized_backend(
         "url": "https://www.youtube.com/watch?v=example",
         "output": Path("media"),
         "format_selector": "137+140",
+        "video_codec": "h264",
     }
 
 
@@ -84,7 +88,7 @@ def test_cli_falls_back_to_ytdlp_when_static_page_is_blocked(
     monkeypatch.setattr(
         cli,
         "download_generic",
-        lambda url, output, format_selector: called.update(
+        lambda url, output, format_selector, video_codec: called.update(
             url=url, output=output, format_selector=format_selector
         ),
     )

@@ -151,7 +151,7 @@ def test_download_uses_safe_ytdlp_defaults(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(youtube.yt_dlp, "YoutubeDL", FakeYoutubeDL)
 
-    download_youtube("https://youtu.be/example", tmp_path)
+    download_youtube("https://youtu.be/example", tmp_path, video_codec="original")
 
     options = recorded["options"]
     assert isinstance(options, dict)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 from typing import Sequence
 from urllib.parse import unquote, urlsplit
@@ -28,6 +29,13 @@ from streamgrab.exceptions import (
 from streamgrab.extractors import GenericExtractor
 from streamgrab.extractors.generic import detect_stream_type
 from streamgrab.filenames import output_path
+from streamgrab.transcode import (
+    DEFAULT_VIDEO_CODEC,
+    VIDEO_CODECS,
+    convert_file,
+    ensure_video_codec,
+)
+from streamgrab.gui_support import configure_output_streams
 from streamgrab.logging import configure_logging
 from streamgrab.models import StreamInfo
 from streamgrab.network import fetch_page, validate_http_url
@@ -64,6 +72,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="발견한 스트림을 표시하고 종료",
     )
+    parser.add_argument(
+        "--codec",
+        choices=VIDEO_CODECS,
+        default=DEFAULT_VIDEO_CODEC,
+        help="저장할 영상 코덱 (기본값: h264, TV 호환). original은 변환하지 않음",
+    )
+    parser.add_argument(
+        "--convert",
+        nargs="+",
+        type=Path,
+        metavar="FILE",
+        help="이미 저장된 영상을 --codec 형식으로 변환 (원본은 유지, -o로 저장 폴더 지정)",
+    )
     parser.add_argument("--debug", action="store_true", help="디버그 로그 활성화")
     parser.add_argument(
         "--version",
@@ -74,6 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    configure_output_streams()
     parser = build_parser()
     args = parser.parse_args(argv)
     logger = configure_logging(args.debug)
@@ -84,6 +106,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(error))
 
     logger.debug("설정 로드 완료: %s", config)
+
+    if args.convert:
+        return _convert_files(parser, args.convert, args.codec, args.output)
 
     if not args.url:
         parser.print_help()
@@ -98,6 +123,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.url,
                     args.output or config.output_directory,
                     args.format,
+                    args.codec,
                 )
             return 0
 
@@ -111,6 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.url,
                     args.output or config.output_directory,
                     args.format,
+                    args.codec,
                 )
             return 0
         if args.list_formats:
@@ -128,11 +155,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(f"저장 시작: {destination}")
         download_stream(selected, destination, config.network_timeout)
+        destination = ensure_video_codec(destination, args.codec)
         print(f"저장 완료: {destination}")
         return 0
     except (StreamGrabError, OSError) as error:
         logger.error("%s", error)
         return 1
+
+
+def _convert_files(
+    parser: argparse.ArgumentParser,
+    files: Sequence[Path],
+    video_codec: str,
+    folder: Path | None,
+) -> int:
+    if video_codec == "original":
+        parser.error("--convert에는 --codec h264 또는 --codec h265를 지정하세요")
+    logger = logging.getLogger("streamgrab")
+    failures = 0
+    for index, source in enumerate(files, start=1):
+        print(f"[{index}/{len(files)}] {source}")
+        try:
+            convert_file(source, video_codec, folder)
+        except (StreamGrabError, OSError) as error:
+            failures += 1
+            logger.error("%s", error)
+    return 1 if failures else 0
 
 
 def _find_streams(url: str, timeout: float) -> list[StreamInfo]:

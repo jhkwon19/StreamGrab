@@ -10,7 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "StreamGrab contributors" }]
-dependencies = ["yt-dlp[default,curl-cffi]>=2026.8.18.122307.dev0"]
+dependencies = [
+    "yt-dlp[default,curl-cffi]>=2026.8.18.122307.dev0",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
