@@ -22,20 +22,29 @@ py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
   exit /b 1
 )
 
-echo [1/3] Updating build tools...
+echo [1/4] Updating build tools...
 py -3 -m pip install --upgrade pip || goto :build_error
-echo [2/3] Installing StreamGrab and PyInstaller...
-py -3 -m pip install -e ".[dev]" pyinstaller || goto :build_error
-echo [3/3] Building StreamGrab.exe...
+echo [2/4] Installing StreamGrab, the latest yt-dlp and PyInstaller...
+py -3 -m pip install --upgrade -e ".[dev]" "yt-dlp[default,curl-cffi]" pyinstaller || goto :build_error
+echo [3/4] Building StreamGrab.exe...
 py -3 -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name StreamGrab ^
   --collect-all yt_dlp ^
   --collect-all curl_cffi ^
+  --collect-all yt_dlp_ejs ^
+  --copy-metadata yt-dlp ^
+  --copy-metadata yt-dlp-ejs ^
   --hidden-import tkinter ^
   src\streamgrab\gui.py || goto :build_error
 
+echo [4/4] Creating the dist\StreamGrab app folder...
+if not exist "dist\StreamGrab" mkdir "dist\StreamGrab" || goto :build_error
+move /y "dist\StreamGrab.exe" "dist\StreamGrab\StreamGrab.exe" >nul || goto :build_error
+
 echo.
-echo Build complete: dist\StreamGrab.exe
+echo Build complete: dist\StreamGrab\StreamGrab.exe
+echo Copy the whole dist\StreamGrab folder. The app keeps yt-dlp up to date
+echo in its yt-dlp subfolder on first launch.
 popd
 pause
 exit /b 0

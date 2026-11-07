@@ -26,6 +26,9 @@ from streamgrab.gui_support import (
     remove_partial_conversions,
     terminate_tree,
     worker_environment,
+    auto_update_enabled,
+    parse_ytdlp_status,
+    ytdlp_command,
 )
 
 _FFMPEG_REQUIRED = "FFmpeg가 필요합니다"
@@ -77,6 +80,7 @@ class StreamGrabApp(tk.Tk):
         # Convert tab state
         self.convert_codec = tk.StringVar(value=next(iter(CONVERT_CODEC_CHOICES)))
         self.convert_target = tk.StringVar(value="same")
+        self.convert_hint = tk.StringVar()
         self.convert_folder = tk.StringVar(value=str(Path.home() / "Videos"))
         self.convert_text = tk.StringVar(value="변환할 영상 파일을 추가하세요")
         self.convert_percent = tk.StringVar(value="")
@@ -86,6 +90,7 @@ class StreamGrabApp(tk.Tk):
         self._convert_results = {"ok": 0, "failed": 0}
 
         self.status = tk.StringVar(value="준비")
+        self.ytdlp_text = tk.StringVar(value="yt-dlp 확인 중…")
 
         # Worker state (one job at a time across both tabs)
         self._events: queue.Queue[tuple[str, object]] = queue.Queue()
@@ -95,6 +100,7 @@ class StreamGrabApp(tk.Tk):
         self._resume_after_ffmpeg: str | None = None
         self._closing = False
         self._cancel_requested = False
+        self._ytdlp_checking = False
 
         self._apply_theme()
         self._build_layout()
@@ -102,6 +108,7 @@ class StreamGrabApp(tk.Tk):
         self.bind("<Control-Return>", lambda _event: self._start_current_tab())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._process_events)
+        self.after(600, lambda: self._check_ytdlp(force=False, user=False))
         self.url_entry.focus_set()
 
     # ------------------------------------------------------------------ style
@@ -247,6 +254,19 @@ class StreamGrabApp(tk.Tk):
         )
         style.map("Vertical.TScrollbar", background=[("active", c["muted"])])
         style.configure("TSeparator", background=c["border"])
+        style.configure(
+            "Link.TButton", font=(_FONT, 8, "underline"), foreground=c["accent"],
+            background=c["bg"], bordercolor=c["bg"], lightcolor=c["bg"],
+            darkcolor=c["bg"], relief="flat", padding=(6, 0),
+        )
+        style.map(
+            "Link.TButton",
+            background=[("active", c["bg"]), ("pressed", c["bg"]), ("disabled", c["bg"])],
+            lightcolor=[("active", c["bg"]), ("pressed", c["bg"])],
+            darkcolor=[("active", c["bg"]), ("pressed", c["bg"])],
+            bordercolor=[("disabled", c["bg"])],
+            foreground=[("disabled", c["disabled"]), ("active", c["accent_hover"])],
+        )
 
     def _card(self, parent: tk.Misc) -> ttk.Frame:
         return ttk.Frame(parent, style="Card.TFrame", padding=_PAD)
@@ -274,8 +294,14 @@ class StreamGrabApp(tk.Tk):
         statusbar.pack(fill="x", side="bottom")
         ttk.Separator(self).pack(fill="x", side="bottom")
         ttk.Label(statusbar, textvariable=self.status, style="Status.TLabel").pack(side="left")
+        self.ytdlp_button = ttk.Button(
+            statusbar, text="업데이트 확인", style="Link.TButton",
+            command=lambda: self._check_ytdlp(force=True, user=True),
+        )
+        self.ytdlp_button.pack(side="right")
+        ttk.Label(statusbar, textvariable=self.ytdlp_text, style="Status.TLabel").pack(side="right")
         ttk.Label(
-            statusbar, text=f"StreamGrab {__version__}", style="Status.TLabel"
+            statusbar, text=f"StreamGrab {__version__}  ·  ", style="Status.TLabel"
         ).pack(side="right")
 
         root = ttk.Frame(self, padding=(20, 16, 20, 8))
@@ -410,11 +436,11 @@ class StreamGrabApp(tk.Tk):
             options, text="찾아보기", command=self._choose_convert_folder, width=9
         )
         self.convert_folder_button.grid(row=2, column=3, padx=(8, 0), pady=(6, 0))
-        ttk.Label(
-            options,
-            text="원본 파일은 그대로 두고 '파일명 (H.264).mp4' 형식의 새 파일을 만듭니다.",
-            style="Hint.TLabel",
-        ).grid(row=3, column=1, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(options, textvariable=self.convert_hint, style="Hint.TLabel").grid(
+            row=3, column=1, columnspan=3, sticky="w", pady=(8, 0)
+        )
+        self.convert_codec.trace_add("write", lambda *_args: self._sync_convert_hint())
+        self._sync_convert_hint()
         self._sync_target_state()
 
         progress = ttk.Frame(tab)
@@ -468,6 +494,10 @@ class StreamGrabApp(tk.Tk):
             self.convert_folder.set(selected)
             self.convert_target.set("folder")
             self._sync_target_state()
+
+    def _sync_convert_hint(self) -> None:
+        label = "H.265" if CONVERT_CODEC_CHOICES[self.convert_codec.get()] == "h265" else "H.264"
+        self.convert_hint.set(f"원본 파일은 그대로 두고 '파일명 ({label}).mp4' 형식의 새 파일을 만듭니다.")
 
     def _sync_target_state(self) -> None:
         state = "normal" if self.convert_target.get() == "folder" else "disabled"
@@ -800,6 +830,9 @@ class StreamGrabApp(tk.Tk):
                 elif event == "ffmpeg_installed":
                     success, output = value  # type: ignore[misc]
                     self._finish_ffmpeg_install(bool(success), str(output))
+                elif event == "ytdlp":
+                    status, user = value  # type: ignore[misc]
+                    self._finish_ytdlp_check(status, bool(user))
         except queue.Empty:
             pass
         if not self._closing:
@@ -901,6 +934,61 @@ class StreamGrabApp(tk.Tk):
             + (failure_detail(output) or "Microsoft Store에서 앱 설치 관리자를 업데이트해 주세요."),
         )
 
+    # ------------------------------------------------------------------ yt-dlp
+    def _check_ytdlp(self, *, force: bool, user: bool) -> None:
+        """Show the active yt-dlp and, in the packaged app, keep it updated."""
+        if self._ytdlp_checking:
+            return
+        self._ytdlp_checking = True
+        self.ytdlp_button.configure(state="disabled")
+        if user:
+            self.ytdlp_text.set("yt-dlp 업데이트 확인 중…")
+        threading.Thread(
+            target=self._run_ytdlp_check,
+            args=(ytdlp_command(force=force, update=user or auto_update_enabled()), user),
+            daemon=True,
+        ).start()
+
+    def _run_ytdlp_check(self, command: list[str], user: bool) -> None:
+        startupinfo = None
+        creationflags = 0
+        if os.name == "nt":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=worker_environment(),
+                timeout=600,
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+            )
+            status = parse_ytdlp_status(result.stdout) or {
+                "message": failure_detail(result.stdout + result.stderr) or "yt-dlp 상태를 확인하지 못했습니다",
+            }
+        except (OSError, subprocess.TimeoutExpired) as error:
+            status = {"message": f"yt-dlp 상태를 확인하지 못했습니다: {error}"}
+        self._events.put(("ytdlp", (status, user)))
+
+    def _finish_ytdlp_check(self, status: dict, user: bool) -> None:
+        self._ytdlp_checking = False
+        self.ytdlp_button.configure(state="normal")
+        active = status.get("active")
+        if active:
+            suffix = " (내장)" if status.get("source") == "bundled" else ""
+            self.ytdlp_text.set(f"yt-dlp {active}{suffix}")
+        else:
+            self.ytdlp_text.set("yt-dlp 알 수 없음")
+        message = str(status.get("message") or "")
+        if status.get("updated") or user or "실패" in message:
+            if message and self._job is None:
+                self.status.set(message)
+
     def _on_close(self) -> None:
         if self._process is not None and self._process.poll() is None:
             if not messagebox.askyesno("종료", "작업이 진행 중입니다. 취소하고 종료할까요?"):
@@ -976,6 +1064,13 @@ def main() -> None:
     # Keeping the worker out of the Tk process makes cancellation reliable and
     # prevents network/FFmpeg work from freezing the window.
     if sys.argv[1:2] == ["--cli"]:
+        from streamgrab.ytdlp_runtime import handle_runtime_args
+
+        # Pick the newest yt-dlp (external folder or bundled) before the CLI
+        # imports it; also serves the update/self-test commands.
+        handled = handle_runtime_args(sys.argv[2:])
+        if handled is not None:
+            raise SystemExit(handled)
         from streamgrab.cli import main as cli_main
 
         raise SystemExit(cli_main(sys.argv[2:]))

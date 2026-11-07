@@ -4,14 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "streamgrab"
-version = "0.2.0"
+version = "0.3.0"
 description = "Extensible command-line tool for analyzing and saving web media streams"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "StreamGrab contributors" }]
 dependencies = [
-    "yt-dlp[default,curl-cffi]>=2026.8.18.122307.dev0",
+    "yt-dlp[default,curl-cffi]>=2026.10.26",
+    "curl-cffi>=0.17.0",
+    "brotli>=1.2.1",
+    "certifi>=2026.10.23",
 ]
 
 [project.optional-dependencies]

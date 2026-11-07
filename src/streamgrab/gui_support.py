@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import re
@@ -63,6 +64,29 @@ def _worker_prefix() -> list[str]:
     if getattr(sys, "frozen", False):
         return [sys.executable, "--cli"]
     return [sys.executable, "-m", "streamgrab"]
+
+
+def auto_update_enabled() -> bool:
+    """Auto-update only the packaged app; developers manage yt-dlp with pip."""
+    return bool(getattr(sys, "frozen", False)) or os.environ.get("STREAMGRAB_AUTO_UPDATE") == "1"
+
+
+def ytdlp_command(*, force: bool, update: bool) -> list[str]:
+    if not update:
+        return [*_worker_prefix(), "--ytdlp-status"]
+    return [*_worker_prefix(), "--update-ytdlp", *(["--force"] if force else [])]
+
+
+def parse_ytdlp_status(output: str) -> dict | None:
+    from streamgrab.ytdlp_runtime import STATUS_PREFIX
+
+    for line in reversed(output.splitlines()):
+        if line.startswith(STATUS_PREFIX):
+            try:
+                return json.loads(line[len(STATUS_PREFIX):])
+            except ValueError:
+                return None
+    return None
 
 
 def cli_command(url: str, destination: Path, video_codec: str = "h264") -> list[str]:

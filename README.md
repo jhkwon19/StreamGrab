@@ -34,9 +34,37 @@ streamgrab --version
 streamgrab-gui
 ```
 
+**다운로드** 탭에서 저장 코덱(H.264 권장, H.265, 원본)을 고를 수 있고,
+**코덱 변환** 탭에서는 이미 받은 영상을 골라 원본을 유지한 채 H.264/H.265 사본을
+만듭니다. TV에서 VP9·AV1 영상이 재생되지 않을 때 사용하세요.
+
 독립 실행 파일이 필요하면 Windows Python 3.11 이상을 설치한 뒤
 `build_windows.bat`를 실행하세요. UNC 형식의 WSL 공유 경로도 스크립트가 임시
-드라이브로 연결하며, 빌드가 끝나면 `dist\StreamGrab.exe`가 생성됩니다.
+드라이브로 연결하며, 빌드가 끝나면 `dist\StreamGrab\StreamGrab.exe`가 생성됩니다.
+`dist\StreamGrab` 폴더째 복사해서 사용하세요.
+
+### yt-dlp 자동 업데이트
+
+실행 파일에는 빌드 시점의 yt-dlp가 비상용으로 들어 있고, 앱은 실행할 때마다(하루
+한 번) PyPI에서 최신 정식 버전을 확인해 실행 파일 옆 `yt-dlp\` 폴더에 설치합니다.
+내려받은 파일은 SHA-256으로 검증하고 별도 프로세스에서 불러오기 점검을 통과해야만
+`current.txt`가 새 버전을 가리키며, 다음 다운로드부터 바로 적용됩니다. 최근 두
+버전만 보관하고, 폴더를 지우면 내장 버전으로 돌아갑니다. 폴더에 쓸 수 없으면
+`%LOCALAPPDATA%\StreamGrab\yt-dlp\`를 사용합니다.
+
+```text
+StreamGrab\
+├─ StreamGrab.exe
+└─ yt-dlp\
+   ├─ current.txt        # 사용 중인 버전 폴더 이름
+   ├─ state.json         # 마지막 확인 시각
+   └─ 2026.10.26\        # yt_dlp + yt_dlp_ejs + manifest.json
+```
+
+curl-cffi, brotli, certifi 같은 의존 패키지는 실행 파일에 포함되어 있으므로
+이들의 보안 업데이트는 `build_windows.bat`로 다시 빌드해야 반영됩니다.
+명령줄에서는 `--update-ytdlp [--force]`, `--ytdlp-status`로 같은 작업을 할 수
+있습니다.
 
 페이지에서 지원 스트림 확인:
 
