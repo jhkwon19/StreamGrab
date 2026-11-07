@@ -11,6 +11,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -80,10 +81,11 @@ def probe_video_codec(path: Path) -> str | None:
 def converted_path(source: Path, video_codec: str, folder: Path | None = None) -> Path:
     """Name for a converted copy, e.g. ``clip.mp4`` -> ``clip (H.264).mp4``."""
     label = CODEC_LABELS[video_codec]
-    target = (folder or source.parent) / f"{source.stem} ({label}).mp4"
+    stem = re.sub(r"\s*\((?:H\.264|H\.265)\)(?: \d+)?$", "", source.stem)
+    target = (folder or source.parent) / f"{stem} ({label}).mp4"
     counter = 2
-    while target.exists():
-        target = (folder or source.parent) / f"{source.stem} ({label}) {counter}.mp4"
+    while target.exists() or target == source:
+        target = (folder or source.parent) / f"{stem} ({label}) {counter}.mp4"
         counter += 1
     return target
 
@@ -128,9 +130,10 @@ def ensure_video_codec(
     label = CODEC_LABELS[video_codec]
     target = _PROBE_NAMES[video_codec]
 
+    audio_ok = audio is None or tv_safe_audio(audio)
     if video.get("codec_name") == target:
         needs_tag = video_codec == "h265" and video.get("codec_tag_string") != "hvc1"
-        if path.suffix.lower() == ".mp4" and not needs_tag and not keep_source:
+        if path.suffix.lower() == ".mp4" and not needs_tag and audio_ok and not keep_source:
             return path
         video_args = ["-c:v", "copy"]
         if video_codec == "h265":
@@ -140,36 +143,80 @@ def ensure_video_codec(
         print(f"{label}로 변환 시작: 원본 코덱 {video.get('codec_name', '알 수 없음')}")
         video_args = list(_ENCODER_ARGS[video_codec])
 
-    if audio is None:
-        audio_args: list[str] = []
-    elif audio.get("codec_name") in {"aac", "mp3"}:
-        audio_args = ["-c:a", "copy"]
-    else:
-        audio_args = ["-c:a", "aac", "-b:a", "192k"]
-
     if destination is None:
         destination = path.with_suffix(".mp4")
     temporary = destination.with_name(f"{destination.stem}.converting.mp4")
+    audio_file = destination.with_name(f"{destination.stem}.converting.aac")
     duration = _float(probe.get("format", {}).get("duration"))
-    command = [
-        ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-        "-i", str(path),
-        "-map", "0:v:0", "-map", "0:a:0?",
-        *video_args, *audio_args,
-        "-movflags", "+faststart",
-        "-progress", "pipe:1", "-nostats",
-        str(temporary),
-    ]
     try:
+        inputs = ["-i", str(path)]
+        maps = ["-map", "0:v:0"]
+        if audio is not None:
+            _prepare_tv_audio(ffmpeg, path, audio, audio_file)
+            inputs += ["-i", str(audio_file)]
+            maps += ["-map", "1:a:0"]
+        command = [
+            ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+            *inputs, *maps,
+            *video_args, "-c:a", "copy",
+            "-movflags", "+faststart",
+            "-progress", "pipe:1", "-nostats",
+            str(temporary),
+        ]
         _run_with_progress(command, duration, label)
         os.replace(temporary, destination)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
+    finally:
+        audio_file.unlink(missing_ok=True)
     if not keep_source and destination != path:
         path.unlink(missing_ok=True)
     print(f"변환 완료: {destination}")
     return destination
+
+
+def tv_safe_audio(stream: dict) -> bool:
+    """AAC-LC with a plain 2-byte AudioSpecificConfig, which every TV decodes.
+
+    YouTube audio pads the config with zero bytes (16 bytes instead of 2).
+    PCs ignore that, but many TV/LCD hardware decoders then play no sound.
+    """
+    return (
+        stream.get("codec_name") == "aac"
+        and stream.get("profile") == "LC"
+        and int(stream.get("extradata_size") or 0) == 2
+        and int(stream.get("channels") or 0) in {1, 2}
+    )
+
+
+def _prepare_tv_audio(ffmpeg: str, source: Path, audio: dict, target: Path) -> None:
+    """Write the first audio track as ADTS AAC-LC.
+
+    Muxing ADTS into MP4 rebuilds a clean 2-byte AudioSpecificConfig, so AAC-LC
+    stereo is fixed losslessly (stream copy). Anything else is re-encoded to
+    AAC-LC stereo.
+    """
+    lossless = (
+        audio.get("codec_name") == "aac"
+        and audio.get("profile") == "LC"
+        and int(audio.get("channels") or 0) in {1, 2}
+    )
+    codec_args = ["-c:a", "copy"] if lossless else ["-c:a", "aac", "-b:a", "192k", "-ac", "2"]
+    command = [
+        ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(source), "-map", "0:a:0", "-vn", *codec_args, "-f", "adts", str(target),
+    ]
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", creationflags=_NO_WINDOW,
+        )
+    except OSError as error:
+        raise FFmpegError(f"FFmpeg를 실행할 수 없습니다: {error}") from error
+    if result.returncode != 0:
+        detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""
+        raise FFmpegError(f"오디오 정리에 실패했습니다 {detail}".strip())
 
 
 def _find_ffprobe(ffmpeg: str) -> str | None:
@@ -188,7 +235,8 @@ def _probe(ffprobe: str, path: Path) -> dict:
             [
                 ffprobe, "-v", "error",
                 "-show_entries",
-                "stream=codec_type,codec_name,codec_tag_string:format=duration",
+                "stream=codec_type,codec_name,codec_tag_string,profile,"
+                "channels,extradata_size:format=duration",
                 "-of", "json", str(path),
             ],
             capture_output=True,

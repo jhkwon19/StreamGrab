@@ -123,7 +123,8 @@ def terminate_tree(process: subprocess.Popen) -> None:
 
 
 def remove_partial_conversions(folder: Path) -> None:
-    for leftover in folder.glob("*.converting.mp4"):
+    leftovers = [*folder.glob("*.converting.mp4"), *folder.glob("*.converting.aac")]
+    for leftover in leftovers:
         try:
             leftover.unlink()
         except OSError:

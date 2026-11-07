@@ -100,3 +100,61 @@ def test_ensure_video_codec_replaces_download_in_place(tmp_path: Path) -> None:
 
     assert result == clip
     assert probe_video_codec(result) == "H.265"
+
+
+def test_converted_path_does_not_stack_codec_suffixes(tmp_path: Path) -> None:
+    source = tmp_path / "clip (H.265).mp4"
+    source.touch()
+    assert converted_path(source, "h265") == tmp_path / "clip (H.265) 2.mp4"
+    assert converted_path(source, "h264") == tmp_path / "clip (H.264).mp4"
+
+
+def test_tv_safe_audio_rejects_padded_youtube_config() -> None:
+    from streamgrab.transcode import tv_safe_audio
+
+    good = {"codec_name": "aac", "profile": "LC", "extradata_size": 2, "channels": 2}
+    assert tv_safe_audio(good)
+    assert not tv_safe_audio({**good, "extradata_size": 16})  # YouTube m4a
+    assert not tv_safe_audio({**good, "extradata_size": 5})   # explicit SBR signalling
+    assert not tv_safe_audio({**good, "profile": "HE-AAC"})
+    assert not tv_safe_audio({**good, "channels": 6})
+
+
+def _audio_config_size(path: Path) -> int:
+    ffmpeg = find_ffmpeg()
+    from streamgrab.transcode import _find_ffprobe, _probe
+
+    probe = _probe(_find_ffprobe(ffmpeg), path)
+    audio = next(s for s in probe["streams"] if s["codec_type"] == "audio")
+    return int(audio["extradata_size"])
+
+
+def test_h264_download_with_non_tv_audio_is_fixed_in_place(tmp_path: Path) -> None:
+    ffmpeg = find_ffmpeg()
+    if ffmpeg is None:
+        pytest.skip("FFmpeg not installed")
+    clip = tmp_path / "already h264.mp4"
+    subprocess.run(
+        [
+            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=1",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+            "-c:v", "libx264", "-c:a", "aac", "-shortest", str(clip),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    assert _audio_config_size(clip) != 2
+
+    result = ensure_video_codec(clip, "h264")
+
+    assert result == clip
+    assert probe_video_codec(result) == "H.264"
+    assert _audio_config_size(result) == 2
+    assert not list(tmp_path.glob("*.converting.*"))
+
+
+def test_converted_files_have_tv_safe_audio(tmp_path: Path) -> None:
+    clip = _make_vp9_clip(tmp_path)
+    result = convert_file(clip, "h265")
+    assert _audio_config_size(result) == 2
